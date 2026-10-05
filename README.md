@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ME5418 Ball on Tray
 
 ## Introduction
@@ -103,3 +104,6 @@ What the 3D picture shows:
 | Orange ball and orange line | The ball, resting on the tray surface, and its path over the last 1.5 s. |
 | Red arrow at the ball ("disturbance push") | Inertial force caused by the base acceleration (opposite to `a_base`, length proportional to its magnitude). Only visible during a disturbance pulse. |
 | Text panel | Same information as in the 2D demo. |
+=======
+# ME5418
+>>>>>>> 8a978dfd20f33c32348ef04725a07219306ebe5f
