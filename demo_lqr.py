@@ -232,36 +232,64 @@ def make_lqr_policy(K):
 
 
 # ----------------------------------------------------------------- the episodes
-def run_episode(env, policy_name, policy_fn, seed, frames=None):
+def run_episode(env, policy_name, policy_fn, seed, frames=None, renderer=None):
     """Run one episode under a policy function and return a summary dict.
 
+    Works for both views. In the 2D view the environment draws itself and
+    ``renderer`` is None; in the 3D view the environment is created with
+    ``render_mode=None`` and ``renderer`` draws it from outside.
+
     Args:
-        env: the environment (rendering follows its render_mode).
+        env: the environment (2D rendering follows its render_mode).
         policy_name: name used in the summary.
         policy_fn: ``policy_fn(obs) -> action``, or None for the random policy.
         seed: seed of the episode (and of the random policy).
         frames: if a list is given, rgb_array frames are appended to it.
+        renderer: a TrayRenderer3D for the 3D view, or None for the 2D view.
     """
     obs, _ = env.reset(seed=seed)
     env.action_space.seed(seed)
+
+    # The 3D renderer needs an explicit first frame; the 2D one is already
+    # drawn by reset() in "human" mode and fetched by render() for a gif.
+    if renderer is not None:
+        first = renderer.render(0.0, 0.0)
+    elif frames is not None:
+        first = env.render()
+    else:
+        first = None
     if frames is not None:
-        frames.append(env.render())
+        frames.append(first)
+    # Timing starts after the first frame, which includes opening the window.
+    drawn_before = 0 if renderer is None else renderer.frames_drawn
+    wall_start = time.perf_counter()
 
     total_reward, terminated, truncated = 0.0, False, False
     peak_dist = float(np.linalg.norm(env.ball_pos))             # [m]
-    while not (terminated or truncated or env.window_closed):
+    while not (terminated or truncated or _window_closed(env, renderer)):
         action = env.action_space.sample() if policy_fn is None else policy_fn(obs)
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
         peak_dist = max(peak_dist, float(np.linalg.norm(env.ball_pos)))
-        if frames is not None and (
-                env.step_count % GIF_FRAME_SKIP == 0 or terminated or truncated):
+
+        keep = env.step_count % GIF_FRAME_SKIP == 0 or terminated or truncated
+        if renderer is not None:
+            if frames is None:
+                # On screen the renderer keeps real-time pace and skips frames.
+                renderer.render(reward, total_reward)
+            elif keep:
+                frames.append(renderer.render(reward, total_reward))
+        elif frames is not None and keep:
             frames.append(env.render())
+
+    wall_time = time.perf_counter() - wall_start
 
     # Keep the final frame visible for a moment.
     fps = env.metadata["render_fps"]
     if frames is not None:
         frames.extend([frames[-1]] * int(END_PAUSE * fps / GIF_FRAME_SKIP))
+    elif renderer is not None:
+        renderer.hold(END_PAUSE)
     elif env.render_mode == "human":
         for _ in range(int(END_PAUSE * fps)):
             env.render()
@@ -274,7 +302,14 @@ def run_episode(env, policy_name, policy_fn, seed, frames=None):
         reason = "window closed by user"
     return {"policy": policy_name, "steps": env.step_count, "return": total_reward,
             "reason": reason, "c_rr": env.c_rr, "disturbances": list(env.disturbances),
-            "peak_dist": peak_dist, "terminated": terminated}
+            "peak_dist": peak_dist, "terminated": terminated,
+            "frames_drawn": 0 if renderer is None else renderer.frames_drawn - drawn_before,
+            "wall_time": wall_time}
+
+
+def _window_closed(env, renderer):
+    """True once the user has closed the window of whichever view is active."""
+    return env.window_closed if renderer is None else renderer.window_closed
 
 
 def compare(policies, n_seeds):
@@ -318,6 +353,9 @@ def parse_args():
                              "(default: all)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
                         help="random seed of the episode(s) (default: {})".format(DEFAULT_SEED))
+    parser.add_argument("--view", choices=["2d", "3d"], default="2d",
+                        help="'2d' uses the environment's built-in top view, '3d' draws "
+                             "the tilting tray with TrayRenderer3D (default: 2d)")
     parser.add_argument("--save-gif", metavar="PATH", default=None,
                         help="do not open a window; render off-screen and save the "
                              "episode(s) to this gif file")
@@ -344,16 +382,29 @@ def main():
         compare(available, args.compare)
         return
 
-    env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
-                       render_mode="rgb_array" if args.save_gif else "human")
+    mode = "rgb_array" if args.save_gif else "human"
+    if args.view == "3d":
+        # The environment itself does not render; the 3D renderer draws it from outside.
+        env = BallOnTrayEnv(friction_range=FRICTION_RANGE,
+                           disturbance_range=DISTURBANCE_RANGE, render_mode=None)
+        renderer = TrayRenderer3D(env, mode=mode)
+    else:
+        env = BallOnTrayEnv(friction_range=FRICTION_RANGE,
+                           disturbance_range=DISTURBANCE_RANGE, render_mode=mode)
+        renderer = None
     frames = [] if args.save_gif else None
 
     for name, policy_fn in available:
         # Every policy gets the same seed, i.e. the same start position, rolling
         # resistance and disturbance schedule.
-        print_summary(run_episode(env, name, policy_fn, args.seed, frames))
-        if env.window_closed:
+        summary = run_episode(env, name, policy_fn, args.seed, frames, renderer)
+        print_summary(summary)
+        if renderer is not None and frames is None:
+            print_render_stats(summary, env.DT)
+        if _window_closed(env, renderer):
             break
+    if renderer is not None:
+        renderer.close()
     env.close()
 
     if args.save_gif:
