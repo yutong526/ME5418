@@ -1,13 +1,19 @@
 """Tests for TrayRenderer3D.
 
-Run with ``python test_renderer_3d.py`` (no test framework required). The
+Run with ``python tests/test_renderer_3d.py`` (no test framework required). The
 functions are also named so that pytest can collect them if it is installed.
 """
 
+import os
+import sys
+
 import numpy as np
 
-from ball_on_tray_gym import BallOnTrayEnv
-from renderer_3d import TrayRenderer3D
+# Make the project root importable, wherever this file is run from.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ball_on_tray_gym import BallOnTrayEnv  # noqa: E402
+from renderer_3d import TrayRenderer3D  # noqa: E402
 
 FULL_FRICTION = (0.005, 0.05)       # full range of c_rr [-]
 FULL_DISTURBANCE = (0.5, 2.0)       # full range of |a_base| [m/s^2]

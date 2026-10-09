@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 .vscode/
+research/
+results_quick/

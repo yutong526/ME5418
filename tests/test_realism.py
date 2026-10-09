@@ -2,26 +2,27 @@
 
 Covers the observation noise (``pos_noise_std``, ``vel_noise_std``), the
 first-order actuator lag (``actuator_tau``) and the action delay
-(``action_delay_steps``), and checks against ``tests/golden_v1.npz`` that the
-default behaviour is the same as before these parameters existed.
+(``action_delay_steps``), and checks against ``golden_v1.npz`` (next to this
+file) that the default behaviour is the same as before these parameters existed.
 
-Run with ``python test_realism.py`` (no test framework required). The functions
+Run with ``python tests/test_realism.py`` (no test framework required). The functions
 are also named so that pytest can collect them if it is installed.
 """
 
 import os
-import subprocess
 import sys
 import warnings
 
 import numpy as np
 from gym.utils.env_checker import check_env
 
-from ball_on_tray_gym import BallOnTrayEnv
-
+# Make the project root and this directory importable, wherever this file is
+# run from. The snapshot path is resolved relative to make_golden.py itself.
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "tests"))
+sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, HERE)
 
+from ball_on_tray_gym import BallOnTrayEnv  # noqa: E402
 import make_golden  # noqa: E402  (tests/make_golden.py)
 
 FULL = {"friction_range": (0.005, 0.05), "disturbance_range": (0.5, 2.0)}
@@ -308,19 +309,6 @@ def test_invalid_parameters_are_rejected():
         raise AssertionError("no ValueError for {}".format(kwargs))
 
 
-# ------------------------------------------------------ 8. the existing tests
-def test_existing_test_scripts_still_pass():
-    """test_env.py and test_renderer_3d.py run without a failure."""
-    for script in ("test_env.py", "test_renderer_3d.py"):
-        result = subprocess.run([sys.executable, os.path.join(HERE, script)], cwd=HERE,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        output = result.stdout.decode("utf-8", "replace")
-        assert result.returncode == 0, output[-2000:]
-        last_line = output.strip().splitlines()[-1]
-        assert last_line.startswith("All ") and last_line.endswith("tests passed."), last_line
-        print("    {}: {}".format(script, last_line))
-
-
 if __name__ == "__main__":
     tests = [
         test_default_behaviour_matches_golden_snapshot,
@@ -331,7 +319,6 @@ if __name__ == "__main__":
         test_reward_and_termination_ignore_noise,
         test_check_env_with_realism_parameters,
         test_invalid_parameters_are_rejected,
-        test_existing_test_scripts_still_pass,
     ]
     for test in tests:
         print("[RUN ] {}".format(test.__name__))

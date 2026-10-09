@@ -1,9 +1,9 @@
 """Record a golden trajectory snapshot of BallOnTrayEnv.
 
 The snapshot pins down the behaviour of the environment before the optional
-realism parameters were added. ``test_realism.py`` replays the same seeds and
-actions and compares the result with the stored file, so any change to the
-default behaviour is detected.
+realism parameters were added. ``tests/test_realism.py`` replays the same
+seeds and actions and compares the result with the stored file, so any change
+to the default behaviour is detected.
 
 IMPORTANT: run this script only on the code from before the realism changes
 (commit 46fcb1f, tag ``pre-realism``). Do not regenerate the snapshot after

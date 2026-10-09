@@ -1,20 +1,27 @@
 """Demo of the Ball-on-Tray environment.
 
-Plays one episode with a random policy and/or one with a PD controller, using
-the full randomisation ranges (rolling resistance and base disturbances).
+Plays one episode per selected policy (random, PD controller, LQR controller),
+using the full randomisation ranges (rolling resistance and base disturbances),
+either in the environment's built-in 2D top view or in the 3D view of
+``TrayRenderer3D``. The controllers live in ``controllers.py``.
 
 Examples:
-    python demo.py                                  # random episode, then PD episode
-    python demo.py --policy pd --seed 3             # PD controller only, other seed
+    python demo.py                                  # random episode, then PD episode (2D)
+    python demo.py --policy all                     # random, then PD, then LQR
+    python demo.py --view 3d                        # same episodes in the 3D view
+    python demo.py --policy lqr --seed 3            # LQR only, another seed
+    python demo.py --realistic                      # with noise, actuator lag and delay
     python demo.py --save-gif media/demo.gif        # no window, write a gif instead
 """
 
 import argparse
 import os
+import time
 
 import numpy as np
 
 from ball_on_tray_gym import BallOnTrayEnv
+from controllers import design_lqr, make_lqr_policy, pd_policy, print_design
 
 # Full randomisation ranges of the environment.
 FRICTION_RANGE = (0.005, 0.05)          # c_rr [-]
@@ -22,73 +29,83 @@ DISTURBANCE_RANGE = (0.5, 2.0)          # ||a_base|| [m/s^2]
 
 DEFAULT_SEED = 4
 
-# PD gains (tilt command per position / velocity error).
-KP = 6.0                                # [rad/m]
-KD = 1.5                                # [rad/(m/s)]
-
-# Scales that undo the normalisation of the observation.
-POS_SCALE = BallOnTrayEnv.TRAY_HALF_SIZE                    # [m]
-VEL_SCALE = BallOnTrayEnv.VEL_SCALE                         # [m/s]
-MAX_TILT = np.deg2rad(BallOnTrayEnv.MAX_TILT_DEG)           # [rad]
-TILT_STEP = np.deg2rad(BallOnTrayEnv.TILT_STEP_DEG)         # [rad/step]
-FRAME_DIM = BallOnTrayEnv.FRAME_DIM
+# Environment arguments switched on by --realistic.
+REALISTIC_KWARGS = {
+    "pos_noise_std": 0.002,             # position measurement noise [m]
+    "vel_noise_std": 0.03,              # velocity measurement noise [m/s]
+    "actuator_tau": 0.05,               # actuator lag time constant [s]
+    "action_delay_steps": 1,            # action delay [control steps]
+}
 
 GIF_FRAME_SKIP = 2      # keep every 2nd frame -> 25 fps gif
 END_PAUSE = 1.0         # how long the last frame of an episode stays visible [s]
 
-
-def pd_policy(obs, kp=KP, kd=KD):
-    """Deterministic PD controller that only uses the observation.
-
-    The newest frame (last 6 entries of the 18-D observation) is
-    de-normalised to position [m], velocity [m/s] and tilt [rad]. Then
-
-        tilt_target = clip(-kp * pos - kd * vel, +/- 15 deg)        [rad]
-        action      = clip((tilt_target - tilt) / 3 deg, -1, 1)     [-]
-
-    The minus signs follow the sign convention of the environment: positive
-    pitch accelerates the ball towards +x, so a ball at x > 0 needs pitch < 0
-    (same for roll and y).
-    """
-    frame = np.asarray(obs, dtype=np.float64)[-FRAME_DIM:]
-    pos = frame[0:2] * POS_SCALE
-    vel = frame[2:4] * VEL_SCALE
-    tilt = frame[4:6] * MAX_TILT
-
-    tilt_target = np.clip(-kp * pos - kd * vel, -MAX_TILT, MAX_TILT)
-    return np.clip((tilt_target - tilt) / TILT_STEP, -1.0, 1.0).astype(np.float32)
+# Policies played by each --policy choice, in order.
+POLICY_CHOICES = {
+    "random": ("random",),
+    "pd": ("pd",),
+    "lqr": ("lqr",),
+    "both": ("random", "pd"),
+    "all": ("random", "pd", "lqr"),
+}
 
 
-def run_episode(env, policy_name, seed, frames=None):
-    """Run one episode and return a summary dict.
+def run_episode(env, policy_name, policy_fn, seed, frames=None, renderer=None):
+    """Run one episode under a policy function and return a summary dict.
+
+    Works for both views. In the 2D view the environment draws itself and
+    ``renderer`` is None; in the 3D view the environment is created with
+    ``render_mode=None`` and ``renderer`` draws it from outside.
 
     Args:
-        env: the environment (rendering follows its render_mode).
-        policy_name: "random" or "pd".
+        env: the environment (2D rendering follows its render_mode).
+        policy_name: name used in the summary.
+        policy_fn: ``policy_fn(obs) -> action``, or None for the random policy.
         seed: seed of the episode (and of the random policy).
         frames: if a list is given, rgb_array frames are appended to it.
+        renderer: a TrayRenderer3D for the 3D view, or None for the 2D view.
     """
     obs, _ = env.reset(seed=seed)
     env.action_space.seed(seed)
+
+    # The 3D renderer needs an explicit first frame; the 2D one is already
+    # drawn by reset() in "human" mode and fetched by render() for a gif.
+    if renderer is not None:
+        first = renderer.render(0.0, 0.0)
+    elif frames is not None:
+        first = env.render()
+    else:
+        first = None
     if frames is not None:
-        frames.append(env.render())
+        frames.append(first)
+    # Timing starts after the first frame, which includes opening the window.
+    drawn_before = 0 if renderer is None else renderer.frames_drawn
+    wall_start = time.perf_counter()
 
     total_reward, terminated, truncated = 0.0, False, False
-    while not (terminated or truncated or env.window_closed):
-        if policy_name == "random":
-            action = env.action_space.sample()
-        else:
-            action = pd_policy(obs)
+    while not (terminated or truncated or _window_closed(env, renderer)):
+        action = env.action_space.sample() if policy_fn is None else policy_fn(obs)
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
-        if frames is not None and (
-                env.step_count % GIF_FRAME_SKIP == 0 or terminated or truncated):
+
+        keep = env.step_count % GIF_FRAME_SKIP == 0 or terminated or truncated
+        if renderer is not None:
+            if frames is None:
+                # On screen the renderer keeps real-time pace and skips frames.
+                renderer.render(reward, total_reward)
+            elif keep:
+                frames.append(renderer.render(reward, total_reward))
+        elif frames is not None and keep:
             frames.append(env.render())
+
+    wall_time = time.perf_counter() - wall_start
 
     # Keep the final frame visible for a moment.
     fps = env.metadata["render_fps"]
     if frames is not None:
         frames.extend([frames[-1]] * int(END_PAUSE * fps / GIF_FRAME_SKIP))
+    elif renderer is not None:
+        renderer.hold(END_PAUSE)
     elif env.render_mode == "human":
         for _ in range(int(END_PAUSE * fps)):
             env.render()
@@ -100,7 +117,14 @@ def run_episode(env, policy_name, seed, frames=None):
     else:
         reason = "window closed by user"
     return {"policy": policy_name, "steps": env.step_count, "return": total_reward,
-            "reason": reason, "c_rr": env.c_rr, "disturbances": list(env.disturbances)}
+            "reason": reason, "c_rr": env.c_rr, "disturbances": list(env.disturbances),
+            "frames_drawn": 0 if renderer is None else renderer.frames_drawn - drawn_before,
+            "wall_time": wall_time}
+
+
+def _window_closed(env, renderer):
+    """True once the user has closed the window of whichever view is active."""
+    return env.window_closed if renderer is None else renderer.window_closed
 
 
 def print_summary(summary):
@@ -116,6 +140,26 @@ def print_summary(summary):
         print("    t = {:5.2f} s .. {:5.2f} s, |a_base| = {:.2f} m/s^2, direction = {:6.1f} deg".format(
             pulse["start"], pulse["start"] + pulse["duration"],
             np.linalg.norm(accel), np.rad2deg(np.arctan2(accel[1], accel[0]))))
+    print("")
+
+
+def print_render_stats(summary, dt):
+    """Print how fast the episode was drawn on screen and whether frames were skipped."""
+    steps, drawn, wall_time = summary["steps"], summary["frames_drawn"], summary["wall_time"]
+    if steps == 0 or wall_time <= 0.0:
+        return
+    print("3D rendering : drew {} frames for {} steps ({:.1f} fps), "
+          "{:.2f} s wall time for {:.2f} s simulated".format(
+              drawn, steps, drawn / wall_time, wall_time, steps * dt))
+    print("")
+
+
+def print_realism(kwargs):
+    """Print the realism parameters switched on by --realistic."""
+    print("realistic    : pos_noise_std = {} m, vel_noise_std = {} m/s, "
+          "actuator_tau = {} s, action_delay_steps = {}".format(
+              kwargs["pos_noise_std"], kwargs["vel_noise_std"],
+              kwargs["actuator_tau"], kwargs["action_delay_steps"]))
     print("")
 
 
@@ -135,32 +179,65 @@ def save_gif(frames, path):
 def parse_args():
     """Parse the command line."""
     parser = argparse.ArgumentParser(description="Ball-on-Tray demo.")
-    parser.add_argument("--policy", choices=["random", "pd", "both"], default="both",
+    parser.add_argument("--view", choices=["2d", "3d"], default="2d",
+                        help="'2d' uses the environment's built-in top view, '3d' draws "
+                             "the tilting tray with TrayRenderer3D (default: 2d)")
+    parser.add_argument("--policy", choices=["random", "pd", "lqr", "both", "all"],
+                        default="both",
                         help="policy to show; 'both' plays a random episode, then a PD "
-                             "episode (default: both)")
+                             "episode; 'all' plays random, then PD, then LQR (default: both)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
                         help="random seed of the episode(s) (default: {})".format(DEFAULT_SEED))
     parser.add_argument("--save-gif", metavar="PATH", default=None,
                         help="do not open a window; render off-screen and save the "
                              "episode(s) to this gif file")
+    parser.add_argument("--realistic", action="store_true",
+                        help="switch on the optional realism parameters: observation noise "
+                             "(0.002 m, 0.03 m/s), actuator lag (0.05 s) and a one-step "
+                             "action delay")
     return parser.parse_args()
 
 
 def main():
     """Run the requested episode(s), on screen or into a gif."""
     args = parse_args()
-    policies = ["random", "pd"] if args.policy == "both" else [args.policy]
+    policy_names = POLICY_CHOICES[args.policy]
 
-    env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
-                        render_mode="rgb_array" if args.save_gif else "human")
+    realism = dict(REALISTIC_KWARGS) if args.realistic else {}
+    if args.realistic:
+        print_realism(realism)
+
+    # None marks the random policy, which samples from the action space instead.
+    policy_fns = {"random": None, "pd": pd_policy}
+    if "lqr" in policy_names:
+        gain, info = design_lqr()
+        print_design(gain, info)
+        policy_fns["lqr"] = make_lqr_policy(gain)
+
+    mode = "rgb_array" if args.save_gif else "human"
+    if args.view == "3d":
+        from renderer_3d import TrayRenderer3D
+        # The environment itself does not render; the 3D renderer draws it from outside.
+        env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
+                            render_mode=None, **realism)
+        renderer = TrayRenderer3D(env, mode=mode)
+    else:
+        env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
+                            render_mode=mode, **realism)
+        renderer = None
     frames = [] if args.save_gif else None
 
-    for policy_name in policies:
-        # Both policies get the same seed, i.e. the same start position,
-        # rolling resistance and disturbance schedule.
-        print_summary(run_episode(env, policy_name, args.seed, frames))
-        if env.window_closed:
+    for name in policy_names:
+        # Every policy gets the same seed, i.e. the same start position, rolling
+        # resistance and disturbance schedule.
+        summary = run_episode(env, name, policy_fns[name], args.seed, frames, renderer)
+        print_summary(summary)
+        if renderer is not None and frames is None:
+            print_render_stats(summary, env.DT)
+        if _window_closed(env, renderer):
             break
+    if renderer is not None:
+        renderer.close()
     env.close()
 
     if args.save_gif:

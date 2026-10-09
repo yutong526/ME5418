@@ -34,9 +34,14 @@ Realism evaluation (optional, selected by command-line arguments):
     ``results/eval_realism_custom.csv``. Without these arguments the script
     behaves exactly as described above and writes the same files as before.
 
+Output directory: ``results/`` for the standard 100 episodes per cell. A run
+with a different ``--episodes`` value writes to ``results_quick/`` instead, so
+that a quick check never replaces the full results. ``--out-dir`` overrides
+both.
+
 Examples:
     python evaluate_baselines.py                    # full evaluation, 100 seeds per cell
-    python evaluate_baselines.py --episodes 10      # quick check
+    python evaluate_baselines.py --episodes 10      # quick check, written to results_quick/
     python evaluate_baselines.py --realism-sweep    # the realism comparison
     python evaluate_baselines.py --actuator-tau 0.08 --action-delay-steps 1
 """
@@ -49,9 +54,8 @@ import time
 import numpy as np
 
 from ball_on_tray_gym import BallOnTrayEnv
-# The controllers are the ones of the demos, with unchanged gains.
-from demo import pd_policy
-from demo_lqr import design_lqr, make_lqr_policy
+# The controllers are the ones of the demo, with unchanged gains.
+from controllers import design_lqr, make_lqr_policy, pd_policy
 
 # ------------------------------------------------------------------------- grid
 FRICTION_VALUES = (0.005, 0.0275, 0.05)             # c_rr [-]
@@ -59,6 +63,8 @@ DISTURBANCE_VALUES = (None, 0.5, 1.0, 2.0, 3.0)     # ||a_base|| [m/s^2], None =
 FULL_FRICTION_RANGE = (0.005, 0.05)                 # c_rr [-]
 FULL_DISTURBANCE_RANGE = (0.5, 2.0)                 # ||a_base|| [m/s^2]
 DEFAULT_EPISODES = 100                              # seeds 0 .. N-1 per cell
+DEFAULT_OUT_DIR = "results"             # output of a run with DEFAULT_EPISODES
+QUICK_OUT_DIR = "results_quick"         # output of a run with any other episode count
 
 # ---------------------------------------------------------------------- metrics
 MAX_RETURN = BallOnTrayEnv().max_steps * (1.0 + BallOnTrayEnv.GOAL_BONUS)   # 750
@@ -571,8 +577,11 @@ def parse_args():
     parser.add_argument("--episodes", type=int, default=DEFAULT_EPISODES,
                         help="episodes per cell and policy, seeds 0..N-1 (default: {})".format(
                             DEFAULT_EPISODES))
-    parser.add_argument("--out-dir", default="results",
-                        help="directory for the csv file and the heat maps (default: results)")
+    parser.add_argument("--out-dir", default=None,
+                        help="directory for the csv file and the heat maps (default: {} "
+                             "with the default --episodes, otherwise {}, so that a quick "
+                             "run does not replace the full results)".format(
+                                 DEFAULT_OUT_DIR, QUICK_OUT_DIR))
     realism = parser.add_argument_group(
         "realism evaluation (full-range cell only; writes eval_realism*.csv instead of "
         "the default files)")
@@ -586,7 +595,10 @@ def parse_args():
                          help="actuator lag time constant [s] (default: 0)")
     realism.add_argument("--action-delay-steps", type=int, default=0, metavar="K",
                          help="action delay in control steps (default: 0)")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.out_dir is None:
+        args.out_dir = DEFAULT_OUT_DIR if args.episodes == DEFAULT_EPISODES else QUICK_OUT_DIR
+    return args
 
 
 def main():

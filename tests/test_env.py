@@ -1,15 +1,20 @@
 """Tests for BallOnTrayEnv.
 
-Run with ``python test_env.py`` (no test framework required). The functions
+Run with ``python tests/test_env.py`` (no test framework required). The functions
 are also named so that pytest can collect them if it is installed.
 """
 
+import os
+import sys
 import warnings
 
 import numpy as np
 from gym.utils.env_checker import check_env
 
-from ball_on_tray_gym import BallOnTrayEnv
+# Make the project root importable, wherever this file is run from.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ball_on_tray_gym import BallOnTrayEnv  # noqa: E402
 
 ZERO_ACTION = np.zeros(2, dtype=np.float32)
 FULL_FRICTION = (0.005, 0.05)       # full curriculum range of c_rr [-]
