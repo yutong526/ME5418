@@ -41,13 +41,13 @@ r = (1 − dist / d_max) + 0.5 · [dist < 0.02 m] − 0.05 · ‖a_t − a_(t−
 ```bash
 conda env create -f environment.yml     # 1. create the environment (only once)
 conda activate me5418-ballontray        # 2. activate it (in every new terminal)
-python demo.py                          # 3. run the demo: random policy, then PD controller
+python demo.py                          # 3. run the demo: random policy, then LQR controller
 python tests/test_env.py                # 4. run the environment tests
 ```
 
 Activate the environment in every new terminal before running anything, otherwise `gym` will not be found or a wrong version will be used; in VS Code, also select `me5418-ballontray` as the Python interpreter.
 
-The demo opens a 3D view of the tilting tray. The default run does not include the LQR controller. To see all three policies:
+The demo opens a 3D view of the tilting tray. The default run shows the random policy and the LQR controller. To also see the PD controller:
 
 ```bash
 python demo.py --policy all             # random, then PD, then LQR
@@ -63,7 +63,6 @@ ME5418_BallOnTray/
 ├── environment.yml
 ├── demo.py
 ├── ball_on_tray_gym.py
-├── renderer_3d.py
 ├── controllers.py
 ├── evaluate_baselines.py
 ├── tests/
@@ -80,8 +79,7 @@ ME5418_BallOnTray/
 | File | Content |
 |---|---|
 | `demo.py` | The demo: random, PD and LQR policies in the 3D view. |
-| `ball_on_tray_gym.py` | The environment class `BallOnTrayEnv` (dynamics, reward, observation). Its `render()` draws through `renderer_3d.py`. |
-| `renderer_3d.py` | `TrayRenderer3D`, the 3D view of the environment, drawn with matplotlib's mplot3d. It only reads the environment and does not change it. Used by `demo.py` and by `BallOnTrayEnv.render()`. |
+| `ball_on_tray_gym.py` | The environment class `BallOnTrayEnv` (dynamics, reward, observation) and the 3D renderer `TrayRenderer3D`, drawn with matplotlib's mplot3d. The renderer only reads the environment and does not change it; it is used by `BallOnTrayEnv.render()` and by `demo.py`. |
 | `controllers.py` | The PD and LQR baseline controllers, used by `demo.py` and `evaluate_baselines.py`. |
 | `evaluate_baselines.py` | Batch evaluation of the PD and LQR controllers without rendering. |
 | `tests/test_env.py` | Tests of the environment. |
@@ -99,13 +97,13 @@ ME5418_BallOnTray/
 python demo.py
 ```
 
-With no arguments this opens a window with a 3D view of the tray and plays two episodes in real time: first a random policy, then a PD controller. All policies of one run use the same seed, so they face the same start position, rolling resistance and disturbance schedule. The environment uses the full randomisation ranges (`c_rr` in 0.005–0.05, disturbance pulses of 0.5–2.0 m/s²). After each episode a summary is printed in the terminal: policy, number of steps, return, why the episode ended, `c_rr` and the disturbance schedule.
+With no arguments this opens a window with a 3D view of the tray and plays two episodes in real time: first a random policy, then the LQR controller, whose gain and closed-loop poles are printed first. All policies of one run use the same seed, so they face the same start position, rolling resistance and disturbance schedule. The environment uses the full randomisation ranges (`c_rr` in 0.005–0.05, disturbance pulses of 0.5–2.0 m/s²). After each episode a summary is printed in the terminal: policy, number of steps, return, why the episode ended, `c_rr` and the disturbance schedule.
 
 ### Command-line arguments
 
 | Argument | Values | Default | Meaning |
 |---|---|---|---|
-| `--policy` | `random`, `pd`, `lqr`, `both`, `all` | `both` | Which policy to show. `both` plays a random episode, then a PD episode. `all` plays random, then PD, then LQR. |
+| `--policy` | `random`, `pd`, `lqr`, `both`, `all` | `both` | Which policy to show. `both` plays a random episode, then an LQR episode. `all` plays random, then PD, then LQR. |
 | `--seed` | integer | `4` | Seed of the episode(s). The same seed always gives the same demo. |
 | `--save-gif PATH` | file path | not set | Do not open a window; render off-screen and save the episode(s) to a gif. |
 | `--realistic` | switch | off | Turn on the optional realism parameters (see below): `pos_noise_std=0.002`, `vel_noise_std=0.03`, `actuator_tau=0.05`, `action_delay_steps=1`. |
@@ -133,6 +131,7 @@ When the LQR controller is used (`lqr` or `all`), its gain and closed-loop poles
 | Green `+` and dashed circle | Goal and goal radius (0.02 m), drawn on the tray surface. |
 | Orange ball and orange line | The ball, resting on the tray surface, and its path over the last 1.5 s. |
 | Red arrow at the ball ("disturbance push") | Inertial force caused by the base acceleration (opposite to `a_base`, length proportional to its magnitude). Only visible during a disturbance pulse. |
+| Caption (top left) | The policy that is running: random, PD controller or LQR controller. With `--realistic` it also says so. |
 | Text panel | Step and time, pitch and roll in degrees, `c_rr` of the episode, reward of the last step, return so far, and whether a disturbance is active (with its magnitude). `BALL OFF TRAY` appears when the ball has left the tray. |
 
 ## Tests
@@ -193,8 +192,9 @@ This lists what changed compared with the version first uploaded to the public r
 | Removed | `demo_3d.py`, `demo_lqr.py` | Merged into `demo.py`. `demo_lqr.py --compare N` is replaced by `evaluate_baselines.py --episodes N`. |
 | Removed | `media/demo.gif`, the 2D view | The project now shows the 3D view only. The `--view` argument no longer exists. |
 | Moved | `test_env.py`, `test_renderer_3d.py` → `tests/` | Run them as `python tests/test_env.py` and `python tests/test_renderer_3d.py`. |
-| Changed | `demo.py` | Single entry point: `--policy` gained `lqr` and `all`, `--realistic` is new, the view is always 3D. `python demo.py` plays the same two episodes as before (random, then PD). |
-| Changed | `ball_on_tray_gym.py` | Four optional realism parameters (`pos_noise_std`, `vel_noise_std`, `actuator_tau`, `action_delay_steps`), off by default. `render()` now draws the 3D view through `renderer_3d.py`; the 2D drawing code was removed. Dynamics, reward and observation are unchanged with default arguments. |
-| Changed | `renderer_3d.py`, `README.md`, `.gitignore` | Documentation and ignore rules for the new structure. |
+| Changed | `demo.py` | Single entry point: `--policy` gained `lqr` and `all`, `--realistic` is new, the view is always 3D. `python demo.py` now plays a random episode and then an LQR episode (before: random, then PD); `--policy pd` and `--policy all` still show the PD controller. |
+| Changed | `ball_on_tray_gym.py` | Four optional realism parameters (`pos_noise_std`, `vel_noise_std`, `actuator_tau`, `action_delay_steps`), off by default. `render()` now draws the 3D view with `TrayRenderer3D`, which was moved into this file; the 2D drawing code was removed. Dynamics, reward and observation are unchanged with default arguments. |
+| Removed | `renderer_3d.py` | The 3D renderer `TrayRenderer3D` now lives in `ball_on_tray_gym.py`, next to the environment. Import it with `from ball_on_tray_gym import TrayRenderer3D`. |
+| Changed | `README.md`, `.gitignore` | Documentation and ignore rules for the new structure. |
 
 Not included yet: `hard_mode.py` and `media/demo_hard_3d.gif`, which exist only in the public repository. `hard_mode.py` imports `demo_lqr.py` and uses the 2D view, so it has to be adapted to this structure before it can be merged.

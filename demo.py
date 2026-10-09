@@ -6,7 +6,7 @@ in the 3D view of ``TrayRenderer3D``: the tray really tilts and the ball sits
 on its surface. The controllers live in ``controllers.py``.
 
 Examples:
-    python demo.py                                  # random episode, then PD episode
+    python demo.py                                  # random episode, then LQR episode
     python demo.py --policy all                     # random, then PD, then LQR
     python demo.py --policy lqr --seed 3            # LQR only, another seed
     python demo.py --realistic                      # with noise, actuator lag and delay
@@ -19,9 +19,8 @@ import time
 
 import numpy as np
 
-from ball_on_tray_gym import BallOnTrayEnv
+from ball_on_tray_gym import BallOnTrayEnv, TrayRenderer3D
 from controllers import design_lqr, make_lqr_policy, pd_policy, print_design
-from renderer_3d import TrayRenderer3D
 
 # Full randomisation ranges of the environment.
 FRICTION_RANGE = (0.005, 0.05)          # c_rr [-]
@@ -40,12 +39,20 @@ REALISTIC_KWARGS = {
 GIF_FRAME_SKIP = 2      # keep every 2nd frame -> 25 fps gif
 END_PAUSE = 1.0         # how long the last frame of an episode stays visible [s]
 
+# Caption shown on the picture while each policy is running.
+POLICY_LABELS = {
+    "random": "Policy: random",
+    "pd": "Policy: PD controller",
+    "lqr": "Policy: LQR controller",
+}
+REALISTIC_LABEL_SUFFIX = "\n(realistic: noise, lag, delay)"     # second line of the caption
+
 # Policies played by each --policy choice, in order.
 POLICY_CHOICES = {
     "random": ("random",),
     "pd": ("pd",),
     "lqr": ("lqr",),
-    "both": ("random", "pd"),
+    "both": ("random", "lqr"),
     "all": ("random", "pd", "lqr"),
 }
 
@@ -158,7 +165,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Ball-on-Tray demo.")
     parser.add_argument("--policy", choices=["random", "pd", "lqr", "both", "all"],
                         default="both",
-                        help="policy to show; 'both' plays a random episode, then a PD "
+                        help="policy to show; 'both' plays a random episode, then an LQR "
                              "episode; 'all' plays random, then PD, then LQR (default: both)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
                         help="random seed of the episode(s) (default: {})".format(DEFAULT_SEED))
@@ -196,6 +203,9 @@ def main():
     frames = [] if args.save_gif else None
 
     for name in policy_names:
+        # The picture says which policy is running.
+        renderer.set_label(POLICY_LABELS[name]
+                           + (REALISTIC_LABEL_SUFFIX if args.realistic else ""))
         # Every policy gets the same seed, i.e. the same start position, rolling
         # resistance and disturbance schedule.
         summary = run_episode(env, renderer, name, policy_fns[name], args.seed, frames)

@@ -12,8 +12,7 @@ import numpy as np
 # Make the project root importable, wherever this file is run from.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ball_on_tray_gym import BallOnTrayEnv  # noqa: E402
-from renderer_3d import TrayRenderer3D  # noqa: E402
+from ball_on_tray_gym import BallOnTrayEnv, TrayRenderer3D  # noqa: E402
 
 FULL_FRICTION = (0.005, 0.05)       # full range of c_rr [-]
 FULL_DISTURBANCE = (0.5, 2.0)       # full range of |a_base| [m/s^2]
@@ -51,6 +50,29 @@ def test_image_shape_and_type():
 
     renderer.close()
     assert renderer._fig is None
+
+
+def test_label_is_shown_on_the_picture():
+    """The caption is empty by default and changes the picture when set."""
+    env, renderer = _make()
+    assert renderer.label == ""
+    plain = renderer.render(0.0, 0.0)
+    assert np.array_equal(plain, renderer.render(0.0, 0.0))    # rendering is repeatable
+
+    artists = dict(renderer._artists)
+    renderer.set_label("Policy: PD controller")
+    labelled = renderer.render(0.0, 0.0)
+    assert labelled.shape == plain.shape
+    changed = np.any(labelled != plain, axis=2)
+    assert changed.any()
+    # The caption sits in the top-left corner and touches nothing else.
+    rows, cols = np.nonzero(changed)
+    assert rows.max() < 0.15 * plain.shape[0] and cols.max() < 0.6 * plain.shape[1]
+    assert all(renderer._artists[name] is artist for name, artist in artists.items())
+
+    renderer.set_label("")
+    assert np.array_equal(plain, renderer.render(0.0, 0.0))    # removed again
+    renderer.close()
 
 
 def test_rotation_is_proper():
@@ -171,6 +193,7 @@ def test_renderer_does_not_change_the_environment():
 if __name__ == "__main__":
     tests = [
         test_image_shape_and_type,
+        test_label_is_shown_on_the_picture,
         test_rotation_is_proper,
         test_lower_side_is_where_the_ball_accelerates,
         test_slope_matches_env_dynamics,
