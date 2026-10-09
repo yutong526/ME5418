@@ -246,16 +246,19 @@ def test_reward_terms():
 
 
 def test_render_rgb_array():
-    """rgb_array mode returns an (H, W, 3) uint8 image that follows the state."""
+    """rgb_array mode returns an (H, W, 3) uint8 image (3D view) that follows the state."""
     env = BallOnTrayEnv(disturbance_range=FULL_DISTURBANCE, render_mode="rgb_array")
     env.reset(seed=0)
+    assert env._renderer is None                        # created on the first render()
     first = env.render()
-    height = int(round(env.RENDER_FIGSIZE[1] * env.RENDER_DPI))
-    width = int(round(env.RENDER_FIGSIZE[0] * env.RENDER_DPI))
+    renderer = env._renderer
+    height = int(round(renderer.FIGSIZE[1] * renderer.DPI))
+    width = int(round(renderer.FIGSIZE[0] * renderer.DPI))
     assert isinstance(first, np.ndarray)
     assert first.shape == (height, width, 3) and first.dtype == np.uint8
+    assert not env.window_closed
 
-    figure = env._fig
+    figure = renderer._fig
     state = (env.ball_pos.copy(), env.ball_vel.copy(), env.tilt.copy())
     for _ in range(5):
         env.step(np.array([1.0, 0.5]))
@@ -264,16 +267,16 @@ def test_render_rgb_array():
     after = (env.ball_pos, env.ball_vel, env.tilt)
     assert later.shape == first.shape and later.dtype == np.uint8
     assert not np.array_equal(first, later)             # the picture changed
-    assert env._fig is figure                           # the figure is reused
+    assert env._renderer is renderer and renderer._fig is figure    # renderer and figure are reused
     assert all(np.array_equal(a, b) for a, b in zip(before, after))  # state untouched
     assert not np.array_equal(state[2], env.tilt)
     env.close()
-    assert env._fig is None
+    assert env._renderer is None
 
     # Without a render mode, render() does nothing.
     env = BallOnTrayEnv()
     env.reset(seed=0)
-    assert env.render() is None
+    assert env.render() is None and env._renderer is None
 
 
 if __name__ == "__main__":

@@ -2,16 +2,15 @@
 
 Plays one episode per selected policy (random, PD controller, LQR controller),
 using the full randomisation ranges (rolling resistance and base disturbances),
-either in the environment's built-in 2D top view or in the 3D view of
-``TrayRenderer3D``. The controllers live in ``controllers.py``.
+in the 3D view of ``TrayRenderer3D``: the tray really tilts and the ball sits
+on its surface. The controllers live in ``controllers.py``.
 
 Examples:
-    python demo.py                                  # random episode, then PD episode (2D)
+    python demo.py                                  # random episode, then PD episode
     python demo.py --policy all                     # random, then PD, then LQR
-    python demo.py --view 3d                        # same episodes in the 3D view
     python demo.py --policy lqr --seed 3            # LQR only, another seed
     python demo.py --realistic                      # with noise, actuator lag and delay
-    python demo.py --save-gif media/demo.gif        # no window, write a gif instead
+    python demo.py --save-gif media/demo_3d.gif     # no window, write a gif instead
 """
 
 import argparse
@@ -22,6 +21,7 @@ import numpy as np
 
 from ball_on_tray_gym import BallOnTrayEnv
 from controllers import design_lqr, make_lqr_policy, pd_policy, print_design
+from renderer_3d import TrayRenderer3D
 
 # Full randomisation ranges of the environment.
 FRICTION_RANGE = (0.005, 0.05)          # c_rr [-]
@@ -50,53 +50,38 @@ POLICY_CHOICES = {
 }
 
 
-def run_episode(env, policy_name, policy_fn, seed, frames=None, renderer=None):
+def run_episode(env, renderer, policy_name, policy_fn, seed, frames=None):
     """Run one episode under a policy function and return a summary dict.
 
-    Works for both views. In the 2D view the environment draws itself and
-    ``renderer`` is None; in the 3D view the environment is created with
-    ``render_mode=None`` and ``renderer`` draws it from outside.
-
     Args:
-        env: the environment (2D rendering follows its render_mode).
+        env: the environment (created with render_mode=None).
+        renderer: the TrayRenderer3D that draws ``env``.
         policy_name: name used in the summary.
         policy_fn: ``policy_fn(obs) -> action``, or None for the random policy.
         seed: seed of the episode (and of the random policy).
         frames: if a list is given, rgb_array frames are appended to it.
-        renderer: a TrayRenderer3D for the 3D view, or None for the 2D view.
     """
     obs, _ = env.reset(seed=seed)
     env.action_space.seed(seed)
 
-    # The 3D renderer needs an explicit first frame; the 2D one is already
-    # drawn by reset() in "human" mode and fetched by render() for a gif.
-    if renderer is not None:
-        first = renderer.render(0.0, 0.0)
-    elif frames is not None:
-        first = env.render()
-    else:
-        first = None
+    first = renderer.render(0.0, 0.0)
     if frames is not None:
         frames.append(first)
     # Timing starts after the first frame, which includes opening the window.
-    drawn_before = 0 if renderer is None else renderer.frames_drawn
+    drawn_before = renderer.frames_drawn
     wall_start = time.perf_counter()
 
     total_reward, terminated, truncated = 0.0, False, False
-    while not (terminated or truncated or _window_closed(env, renderer)):
+    while not (terminated or truncated or renderer.window_closed):
         action = env.action_space.sample() if policy_fn is None else policy_fn(obs)
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
 
-        keep = env.step_count % GIF_FRAME_SKIP == 0 or terminated or truncated
-        if renderer is not None:
-            if frames is None:
-                # On screen the renderer keeps real-time pace and skips frames.
-                renderer.render(reward, total_reward)
-            elif keep:
-                frames.append(renderer.render(reward, total_reward))
-        elif frames is not None and keep:
-            frames.append(env.render())
+        if frames is None:
+            # On screen the renderer keeps real-time pace and skips frames.
+            renderer.render(reward, total_reward)
+        elif env.step_count % GIF_FRAME_SKIP == 0 or terminated or truncated:
+            frames.append(renderer.render(reward, total_reward))
 
     wall_time = time.perf_counter() - wall_start
 
@@ -104,11 +89,8 @@ def run_episode(env, policy_name, policy_fn, seed, frames=None, renderer=None):
     fps = env.metadata["render_fps"]
     if frames is not None:
         frames.extend([frames[-1]] * int(END_PAUSE * fps / GIF_FRAME_SKIP))
-    elif renderer is not None:
+    else:
         renderer.hold(END_PAUSE)
-    elif env.render_mode == "human":
-        for _ in range(int(END_PAUSE * fps)):
-            env.render()
 
     if terminated:
         reason = "ball left the tray"
@@ -118,13 +100,8 @@ def run_episode(env, policy_name, policy_fn, seed, frames=None, renderer=None):
         reason = "window closed by user"
     return {"policy": policy_name, "steps": env.step_count, "return": total_reward,
             "reason": reason, "c_rr": env.c_rr, "disturbances": list(env.disturbances),
-            "frames_drawn": 0 if renderer is None else renderer.frames_drawn - drawn_before,
+            "frames_drawn": renderer.frames_drawn - drawn_before,
             "wall_time": wall_time}
-
-
-def _window_closed(env, renderer):
-    """True once the user has closed the window of whichever view is active."""
-    return env.window_closed if renderer is None else renderer.window_closed
 
 
 def print_summary(summary):
@@ -179,9 +156,6 @@ def save_gif(frames, path):
 def parse_args():
     """Parse the command line."""
     parser = argparse.ArgumentParser(description="Ball-on-Tray demo.")
-    parser.add_argument("--view", choices=["2d", "3d"], default="2d",
-                        help="'2d' uses the environment's built-in top view, '3d' draws "
-                             "the tilting tray with TrayRenderer3D (default: 2d)")
     parser.add_argument("--policy", choices=["random", "pd", "lqr", "both", "all"],
                         default="both",
                         help="policy to show; 'both' plays a random episode, then a PD "
@@ -214,30 +188,23 @@ def main():
         print_design(gain, info)
         policy_fns["lqr"] = make_lqr_policy(gain)
 
-    mode = "rgb_array" if args.save_gif else "human"
-    if args.view == "3d":
-        from renderer_3d import TrayRenderer3D
-        # The environment itself does not render; the 3D renderer draws it from outside.
-        env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
-                            render_mode=None, **realism)
-        renderer = TrayRenderer3D(env, mode=mode)
-    else:
-        env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
-                            render_mode=mode, **realism)
-        renderer = None
+    # The environment itself does not render here; the 3D renderer draws it from
+    # outside, which lets the demo pass the reward and control the pacing.
+    env = BallOnTrayEnv(friction_range=FRICTION_RANGE, disturbance_range=DISTURBANCE_RANGE,
+                        render_mode=None, **realism)
+    renderer = TrayRenderer3D(env, mode="rgb_array" if args.save_gif else "human")
     frames = [] if args.save_gif else None
 
     for name in policy_names:
         # Every policy gets the same seed, i.e. the same start position, rolling
         # resistance and disturbance schedule.
-        summary = run_episode(env, name, policy_fns[name], args.seed, frames, renderer)
+        summary = run_episode(env, renderer, name, policy_fns[name], args.seed, frames)
         print_summary(summary)
-        if renderer is not None and frames is None:
+        if frames is None:
             print_render_stats(summary, env.DT)
-        if _window_closed(env, renderer):
+        if renderer.window_closed:
             break
-    if renderer is not None:
-        renderer.close()
+    renderer.close()
     env.close()
 
     if args.save_gif:

@@ -1,8 +1,10 @@
 """3D visualisation of the Ball-on-Tray environment (matplotlib mplot3d only).
 
 ``TrayRenderer3D`` draws a ``BallOnTrayEnv`` from outside: it only reads the
-public attributes of the environment and never changes its state. The existing
-2D ``BallOnTrayEnv.render`` is not used and not affected.
+public attributes of the environment and never changes its state. It can be
+used directly (as ``demo.py`` does, with an environment created with
+``render_mode=None``), and it is also what ``BallOnTrayEnv.render`` uses when
+the environment is created with a render mode.
 
 Geometry (derived from the sign convention of the environment)
 --------------------------------------------------------------

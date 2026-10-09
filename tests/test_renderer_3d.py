@@ -164,7 +164,7 @@ def test_renderer_does_not_change_the_environment():
              env.c_rr, env.step_count, env.last_reward, env.episode_return)
     assert all(np.array_equal(a, b) for a, b in zip(before, after))
     assert np.array_equal(obs_before, env._get_obs())
-    assert env.render_mode is None and env._fig is None       # 2D renderer untouched
+    assert env.render_mode is None and env._renderer is None   # the env made no renderer
     renderer.close()
 
 

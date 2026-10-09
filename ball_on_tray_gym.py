@@ -22,7 +22,6 @@ The only other dependency is numpy; matplotlib is imported lazily and only
 when the environment is rendered.
 """
 
-import time
 from collections import deque
 
 import gym
@@ -79,7 +78,7 @@ class BallOnTrayEnv(gym.Env):
             pulses [m/s^2], or None for no disturbance at all. The full
             curriculum range is (0.5, 2.0).
         max_steps: number of control steps before the episode is truncated.
-        render_mode: None (no rendering), "human" (interactive matplotlib
+        render_mode: None (no rendering), "human" (interactive 3D matplotlib
             window, updated automatically by ``reset`` and ``step``) or
             "rgb_array" (``render`` returns an image). See ``render``.
 
@@ -170,15 +169,7 @@ class BallOnTrayEnv(gym.Env):
     NOISE_SEED_STREAM = 5418
 
     # --------------------------------------------------------------- rendering
-    # These constants only affect the picture, never the dynamics.
-    RENDER_FIGSIZE = (9.0, 6.0)     # figure size [inch]
-    RENDER_DPI = 100                # -> 900 x 600 pixel frames
-    RENDER_FONT_SIZE = 14           # font size of the text panel [pt]
     BALL_RADIUS = 0.01              # drawn ball radius [m] (not used by the physics)
-    TRAIL_LENGTH = 75               # number of past positions in the trail (1.5 s)
-    VIEW_MARGIN = 0.06              # visible border around the tray [m]
-    DISTURBANCE_ARROW_SCALE = 0.05  # arrow length per unit |a_base| [m / (m/s^2)]
-    TILT_ARROW_LENGTH = 0.12        # arrow length per axis at maximum tilt [m]
 
     def __init__(self, friction_range=(0.02, 0.02), disturbance_range=None,
                  max_steps=500, render_mode=None, pos_noise_std=0.0,
@@ -245,8 +236,6 @@ class BallOnTrayEnv(gym.Env):
         # Bookkeeping shown by the renderer (not used by the dynamics).
         self.last_reward = 0.0                          # reward of the last step [-]
         self.episode_return = 0.0                       # sum of rewards since reset [-]
-        # True once the user has closed the "human" window; render() is then a no-op.
-        self.window_closed = False
 
         self._prev_action = np.zeros(2, dtype=np.float64)
         self._frames = deque(maxlen=self.N_STACK)
@@ -255,14 +244,8 @@ class BallOnTrayEnv(gym.Env):
         # Generator of the observation noise (only created if noise is enabled).
         self._noise_rng = None
 
-        # Rendering state, created lazily on the first render() call.
-        self._fig = None                # matplotlib figure
-        self._artists = {}              # name -> artist updated every frame
-        self._use_blit = False          # redraw only the moving artists ("human")
-        self._background = None         # cached static background for blitting
-        self._trail = deque(maxlen=self.TRAIL_LENGTH)
-        self._trail_step = 0            # step_count of the newest trail point
-        self._last_frame_time = None    # wall-clock time of the last "human" frame [s]
+        # 3D renderer (TrayRenderer3D), created lazily on the first render() call.
+        self._renderer = None
 
     # ------------------------------------------------------------------ gym API
     def reset(self, seed=None, options=None):
@@ -341,230 +324,41 @@ class BallOnTrayEnv(gym.Env):
         return self._get_obs(), reward, terminated, truncated, info
 
     def render(self):
-        """Draw the current state as a top view of the tray.
+        """Draw the current state in 3D (a tilting tray with the ball on it).
 
         The mode is chosen in the constructor (gym 0.26 API):
 
-            "human"      update an interactive matplotlib window at
-                         ``metadata["render_fps"]`` and return None. ``reset``
-                         and ``step`` already call this, so user code normally
-                         does not have to.
+            "human"      update an interactive matplotlib window in real time
+                         and return None. ``reset`` and ``step`` already call
+                         this, so user code normally does not have to.
             "rgb_array"  return the frame as an (H, W, 3) uint8 array.
             None         do nothing.
 
-        Elements of the picture:
-            * tray outline, goal marker at the centre, dashed goal-radius circle
-            * the ball and the trail of its last ``TRAIL_LENGTH`` positions
-            * red arrow at the ball: inertial force caused by the base
-              acceleration (direction -a_base, length proportional to ||a_base||),
-              shown only while a disturbance pulse is active
-            * blue arrow at the centre: downhill direction of the tray, i.e.
-              the direction in which the tilt accelerates the ball
-              (components proportional to pitch and roll)
-            * text panel: step and time, pitch and roll [deg], c_rr, reward of
-              the last step, return of the episode, disturbance status
-
-        The figure and all artists are created once; later calls only update
-        their data. Rendering only reads the public state (``ball_pos``,
-        ``ball_vel``, ``tilt``, ``a_base``, ``c_rr``, ``tray_half_size``,
-        ``step_count``, ``last_reward``, ``episode_return``) and never changes
-        the physical state.
+        The picture is drawn by ``TrayRenderer3D`` (``renderer_3d.py``), which
+        is created on the first call and reused afterwards; see that class for
+        the elements of the picture. Rendering only reads the public state
+        (``ball_pos``, ``ball_vel``, ``tilt``, ``a_base``, ``c_rr``,
+        ``tray_half_size``, ``step_count``, ``last_reward``,
+        ``episode_return``) and never changes the physical state.
         """
         if self.render_mode is None or self.window_closed:
             return None
-        if self._fig is None:
-            self._init_render()
-        self._update_artists()
+        if self._renderer is None:
+            # Imported here so that the environment itself only needs numpy.
+            from renderer_3d import TrayRenderer3D
+            self._renderer = TrayRenderer3D(self, mode=self.render_mode)
+        return self._renderer.render(self.last_reward, self.episode_return)
 
-        if self.render_mode == "rgb_array":
-            canvas = self._fig.canvas
-            canvas.draw()
-            # buffer_rgba() is (H, W, 4) uint8; drop the alpha channel.
-            return np.asarray(canvas.buffer_rgba())[:, :, :3].copy()
-
-        self._draw_human_frame()
-        return None
+    @property
+    def window_closed(self):
+        """True once the user has closed the "human" window; render() is then a no-op."""
+        return self._renderer is not None and self._renderer.window_closed
 
     def close(self):
         """Close the render window (if any) and free the figure."""
-        if self._fig is not None:
-            if self.render_mode == "human":
-                import matplotlib.pyplot as plt
-                plt.close(self._fig)
-            self._fig = None
-        self._artists = {}
-        self._background = None
-        self._trail.clear()
-        self._last_frame_time = None
-        self.window_closed = False
-
-    # ---------------------------------------------------------------- rendering
-    def _init_render(self):
-        """Create the figure and every artist exactly once."""
-        from matplotlib.lines import Line2D
-        from matplotlib.patches import Circle, FancyArrowPatch, Rectangle
-
-        if self.render_mode == "human":
-            import matplotlib.pyplot as plt
-            self._fig = plt.figure(figsize=self.RENDER_FIGSIZE, dpi=self.RENDER_DPI)
-            canvas = self._fig.canvas
-            canvas.mpl_connect("close_event", self._on_window_close)
-            canvas.mpl_connect("draw_event", self._on_draw)
-            self._use_blit = bool(getattr(canvas, "supports_blit", False))
-        else:
-            # Off-screen figure: no window and no GUI backend required.
-            from matplotlib.backends.backend_agg import FigureCanvasAgg
-            from matplotlib.figure import Figure
-            self._fig = Figure(figsize=self.RENDER_FIGSIZE, dpi=self.RENDER_DPI)
-            FigureCanvasAgg(self._fig)
-            self._use_blit = False
-
-        half = self.tray_half_size
-        limit = half + self.VIEW_MARGIN
-        # Square axes on the left (492 x 492 px), text panel on the right.
-        ax = self._fig.add_axes([0.105, 0.11, 0.5467, 0.82])
-        ax.set_xlim(-limit, limit)
-        ax.set_ylim(-limit, limit)
-        ax.set_aspect("equal")
-        ax.set_xlabel("x [m]", fontsize=self.RENDER_FONT_SIZE - 1)
-        ax.set_ylabel("y [m]", fontsize=self.RENDER_FONT_SIZE - 1, labelpad=2)
-        ax.tick_params(labelsize=self.RENDER_FONT_SIZE - 3)
-        ax.set_title("Ball on Tray (top view, tray frame)", fontsize=self.RENDER_FONT_SIZE)
-
-        # Static artists.
-        ax.add_patch(Rectangle((-half, -half), 2.0 * half, 2.0 * half,
-                               facecolor="#f3ecdc", edgecolor="#333333", linewidth=2.0))
-        ax.add_patch(Circle((0.0, 0.0), self.GOAL_RADIUS, fill=False,
-                            edgecolor="#2ca02c", linestyle="--", linewidth=1.5))
-        ax.plot([0.0], [0.0], marker="+", markersize=10, color="#2ca02c")
-
-        # Dynamic artists (their data is updated every frame).
-        trail, = ax.plot([], [], color="#ff7f0e", linewidth=1.5, alpha=0.7, zorder=3)
-        tilt_arrow = FancyArrowPatch((0.0, 0.0), (0.01, 0.0), arrowstyle="-|>",
-                                     mutation_scale=14, linewidth=2.0,
-                                     color="#1f77b4", alpha=0.85, zorder=4)
-        ball = Circle((0.0, 0.0), self.BALL_RADIUS, facecolor="#ff7f0e",
-                      edgecolor="black", linewidth=1.0, zorder=5)
-        disturbance_arrow = FancyArrowPatch((0.0, 0.0), (0.01, 0.0), arrowstyle="-|>",
-                                            mutation_scale=14, linewidth=2.0,
-                                            color="#d62728", zorder=6)
-        ax.add_patch(tilt_arrow)
-        ax.add_patch(ball)
-        ax.add_patch(disturbance_arrow)
-        text = self._fig.text(0.68, 0.93, "", va="top", ha="left",
-                              family="monospace", fontsize=self.RENDER_FONT_SIZE)
-
-        self._fig.legend(
-            handles=[
-                Line2D([], [], linestyle="none", marker="o", markersize=8,
-                       markerfacecolor="#ff7f0e", markeredgecolor="black", label="ball"),
-                Line2D([], [], color="#ff7f0e", linewidth=1.5, alpha=0.7, label="recent path"),
-                Line2D([], [], color="#2ca02c", linestyle="--", label="goal radius"),
-                Line2D([], [], color="#1f77b4", linewidth=2.0, marker=">",
-                       label="downhill (tilt)"),
-                Line2D([], [], color="#d62728", linewidth=2.0, marker=">",
-                       label="disturbance push"),
-            ],
-            loc="lower left", bbox_to_anchor=(0.665, 0.09),
-            fontsize=self.RENDER_FONT_SIZE - 3, frameon=False)
-
-        self._artists = {"trail": trail, "tilt_arrow": tilt_arrow, "ball": ball,
-                         "disturbance_arrow": disturbance_arrow, "text": text}
-        # Animated artists are skipped by a normal draw, which lets the static
-        # background be cached and only these artists be redrawn (blitting).
-        for artist in self._artists.values():
-            artist.set_animated(self._use_blit)
-
-        self._background = None
-        self._trail.clear()
-        if self.render_mode == "human":
-            plt.show(block=False)
-
-    def _update_artists(self):
-        """Copy the current public state into the existing artists."""
-        # Trail: restart it on a new episode, add at most one point per step.
-        if self.step_count == 0 or self.step_count < self._trail_step:
-            self._trail.clear()
-        if not self._trail or self.step_count != self._trail_step:
-            self._trail.append(self.ball_pos.copy())
-        self._trail_step = self.step_count
-        trail = np.array(self._trail)
-        self._artists["trail"].set_data(trail[:, 0], trail[:, 1])
-
-        self._artists["ball"].center = (self.ball_pos[0], self.ball_pos[1])
-
-        # Downhill arrow from the tray centre: +pitch -> +x, +roll -> +y.
-        downhill = self.tilt / self.max_tilt * self.TILT_ARROW_LENGTH      # [m]
-        self._set_arrow(self._artists["tilt_arrow"], np.zeros(2), downhill)
-
-        # Inertial force felt by the ball in the tray frame: opposite to a_base.
-        push = -self.a_base * self.DISTURBANCE_ARROW_SCALE                 # [m]
-        self._set_arrow(self._artists["disturbance_arrow"], self.ball_pos, push)
-
-        a_base_norm = float(np.linalg.norm(self.a_base))
-        pitch_deg, roll_deg = np.rad2deg(self.tilt)
-        lines = [
-            "step   {:d} / {:d}".format(self.step_count, self.max_steps),
-            "time   {:.2f} s".format(self.step_count * self.DT),
-            "",
-            "pitch  {:+6.2f} deg".format(pitch_deg),
-            "roll   {:+6.2f} deg".format(roll_deg),
-            "c_rr   {:.4f}".format(self.c_rr),
-            "",
-            "reward {:+.3f}".format(self.last_reward),
-            "return {:+.2f}".format(self.episode_return),
-            "",
-            "disturbance",
-            "ACTIVE {:.2f} m/s^2".format(a_base_norm) if a_base_norm > 0.0 else "none",
-        ]
-        if self._is_out_of_bounds():
-            lines += ["", "BALL OFF TRAY"]
-        self._artists["text"].set_text("\n".join(lines))
-
-    @staticmethod
-    def _set_arrow(arrow, start, vector):
-        """Place an arrow at ``start`` pointing along ``vector``; hide it if ~zero."""
-        if np.linalg.norm(vector) < 1e-4:
-            arrow.set_visible(False)
-            return
-        arrow.set_positions((start[0], start[1]),
-                            (start[0] + vector[0], start[1] + vector[1]))
-        arrow.set_visible(True)
-
-    def _draw_human_frame(self):
-        """Show the updated artists in the window and keep real-time pace."""
-        canvas = self._fig.canvas
-        if self._use_blit:
-            if self._background is None:
-                canvas.draw()       # full draw; _on_draw caches the background
-            if self._background is None:
-                self._background = canvas.copy_from_bbox(self._fig.bbox)
-            canvas.restore_region(self._background)
-            for artist in self._artists.values():
-                self._fig.draw_artist(artist)
-            canvas.blit(self._fig.bbox)
-        else:
-            canvas.draw_idle()
-        canvas.flush_events()
-
-        # Sleep so that frames are shown at render_fps (= 1 / DT, real time).
-        period = 1.0 / self.metadata["render_fps"]                  # [s]
-        now = time.perf_counter()
-        if self._last_frame_time is not None:
-            remaining = period - (now - self._last_frame_time)
-            if remaining > 0.0:
-                time.sleep(remaining)
-        self._last_frame_time = time.perf_counter()
-
-    def _on_draw(self, event):
-        """Matplotlib callback: cache the static background after a full draw
-        (first frame, window resize) for blitting."""
-        if self._fig is not None and self._use_blit:
-            self._background = self._fig.canvas.copy_from_bbox(self._fig.bbox)
-
-    def _on_window_close(self, event):
-        """Matplotlib callback: the user closed the window."""
-        self.window_closed = True
+        if self._renderer is not None:
+            self._renderer.close()
+            self._renderer = None
 
     # ------------------------------------------------------- reset sub-routines
     def _sample_friction(self):
