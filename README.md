@@ -30,6 +30,8 @@ Activate the environment in every new terminal before running anything, otherwis
 | `renderer_3d.py` | `TrayRenderer3D`, a 3D view of the environment drawn from outside with matplotlib's mplot3d. It only reads the environment and does not change it. |
 | `demo_3d.py` | 3D demo: same episodes and arguments as `demo.py`, drawn with `TrayRenderer3D`. |
 | `test_renderer_3d.py` | Tests of the 3D renderer (image format, tilt direction, ball on the tray surface). |
+| `test_realism.py` | Tests of the optional realism parameters, including the regression check against `tests/golden_v1.npz`. |
+| `tests/` | `make_golden.py` and the trajectory snapshot `golden_v1.npz` recorded before the realism parameters were added. Do not regenerate the snapshot. |
 | `environment.yml` | Conda environment. |
 | `media/` | Recorded demos (`demo.gif`, `demo_3d.gif`). |
 | `report/` | Project report. |
@@ -103,3 +105,29 @@ What the 3D picture shows:
 | Orange ball and orange line | The ball, resting on the tray surface, and its path over the last 1.5 s. |
 | Red arrow at the ball ("disturbance push") | Inertial force caused by the base acceleration (opposite to `a_base`, length proportional to its magnitude). Only visible during a disturbance pulse. |
 | Text panel | Same information as in the 2D demo. |
+
+## Optional realism parameters
+
+`BallOnTrayEnv` has four optional constructor arguments that make the task more realistic. All of them are off by default, and with the defaults the environment behaves exactly as before (same trajectories, observations and rewards for the same seed and actions). The observation stays 18-dimensional.
+
+```python
+env = BallOnTrayEnv(pos_noise_std=0.002, vel_noise_std=0.03,
+                    actuator_tau=0.05, action_delay_steps=1)
+```
+
+| Parameter | Meaning | Default | Assumption of the proposal it relaxes |
+|---|---|---|---|
+| `pos_noise_std` | Standard deviation [m] of Gaussian noise on the measured ball position: measurement error of the camera or pressure sensor. | `0.0` (no noise) | Ideal sensor |
+| `vel_noise_std` | Standard deviation [m/s] of Gaussian noise on the measured ball velocity. | `0.0` (no noise) | Ideal sensor |
+| `actuator_tau` | Time constant [s] of a first-order lag between the commanded and the actual tray tilt: motors and arm cannot reach a commanded angle instantly. | `0.0` (instant) | Ideal actuator |
+| `action_delay_steps` | Number of control steps (20 ms each) before an action takes effect: latency of sensing, computation and communication. | `0` (no delay) | An action takes effect in the same control step |
+
+Details:
+
+- The noise only changes the observation. The physical state, the reward, the out-of-bounds check and the state in `info` use the true values. Each new frame gets noise once; frames already in the stack are not disturbed again.
+- The noise has its own random generator, derived from the `reset` seed. Changing the noise settings does not change the start position, `c_rr` or the disturbance plan of a seed.
+- With `actuator_tau > 0`, actions accumulate into the commanded tilt `env.tilt_cmd`, and the actual tilt `env.tilt` follows it. The physics, the observation and both renderers use the actual tilt; `info` contains both (`tilt`, `tilt_cmd`).
+- With a delay, the action penalties of the reward still use the action the agent gave, not the delayed one.
+- Order inside one step: delay queue, commanded tilt, actuator lag, actual tilt, ball dynamics.
+
+`python test_realism.py` tests these parameters. `python evaluate_baselines.py --realism-sweep` compares the PD and LQR baselines under them and writes `results/eval_realism.csv`.

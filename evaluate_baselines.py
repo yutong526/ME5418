@@ -24,9 +24,21 @@ Outputs:
     results/survival_heatmap_pd.png       survival rate, c_rr vs disturbance
     results/survival_heatmap_lqr.png
 
+Realism evaluation (optional, selected by command-line arguments):
+    ``--realism-sweep`` runs both controllers, with unchanged gains, on the
+    full-range cell under a fixed list of realism settings (observation noise,
+    actuator lag, action delay and their combination) and writes
+    ``results/eval_realism.csv``. Giving any of ``--pos-noise-std``,
+    ``--vel-noise-std``, ``--actuator-tau`` or ``--action-delay-steps``
+    instead evaluates that single setting next to the ideal one and writes
+    ``results/eval_realism_custom.csv``. Without these arguments the script
+    behaves exactly as described above and writes the same files as before.
+
 Examples:
     python evaluate_baselines.py                    # full evaluation, 100 seeds per cell
     python evaluate_baselines.py --episodes 10      # quick check
+    python evaluate_baselines.py --realism-sweep    # the realism comparison
+    python evaluate_baselines.py --actuator-tau 0.08 --action-delay-steps 1
 """
 
 import argparse
@@ -55,6 +67,32 @@ CALM_START_TIME = 1.0       # steps before this episode time are never "calm" [s
 CALM_AFTER_PULSE = 1.0      # nor are steps this soon after a disturbance ended [s]
 SATURATION_TOL_DEG = 1e-6   # |tilt| >= limit - tol counts as saturated [deg]
 FAILURE_THRESHOLD = 95.0    # survival below this is reported as "clearly failing" [%]
+# A sign flip of the action is only counted if both actions are larger than
+# this, so that floating-point residue around a zero action is not counted [-].
+SIGN_FLIP_MIN_ACTION = 1e-3
+
+# ---------------------------------------------------------------------- realism
+# Settings of the realism sweep: (label, extra environment arguments).
+REALISM_SETTINGS = (
+    ("ideal", {}),
+    ("noise", {"pos_noise_std": 0.002, "vel_noise_std": 0.03}),
+    ("lag 0.05 s", {"actuator_tau": 0.05}),
+    ("lag 0.10 s", {"actuator_tau": 0.10}),
+    ("delay 1 step", {"action_delay_steps": 1}),
+    ("delay 2 steps", {"action_delay_steps": 2}),
+    ("noise+lag+delay", {"pos_noise_std": 0.002, "vel_noise_std": 0.03,
+                         "actuator_tau": 0.05, "action_delay_steps": 1}),
+)
+REALISM_DEFAULTS = {"pos_noise_std": 0.0, "vel_noise_std": 0.0,
+                    "actuator_tau": 0.0, "action_delay_steps": 0}
+REALISM_CSV_FIELDS = [
+    "setting", "pos_noise_std", "vel_noise_std", "actuator_tau", "action_delay_steps",
+    "policy", "seed", "survived", "steps", "return", "return_pct_of_max",
+    "steady_state_error_mm", "calm_steps", "goal_zone_fraction",
+    "tilt_saturation_fraction", "action_change_calm", "sign_flips_per_s",
+    "c_rr", "n_pulses",
+    "fail_disturbance_active", "fail_disturbance_magnitude", "fail_time_since_pulse_s",
+]
 
 CSV_FIELDS = [
     "condition", "c_rr_setting", "disturbance_setting", "policy", "seed",
@@ -125,6 +163,9 @@ def run_episode(env, policy_fn, seed):
     last_active_time = None     # episode time at which a pulse was last active [s]
     terminated = truncated = False
     info = {}
+    # Action jitter, measured over pairs of consecutive calm steps.
+    prev_action, prev_calm = None, False
+    calm_pairs, change_sum, sign_flips = 0, 0.0, 0
 
     while not (terminated or truncated):
         action = env.action_space.sample() if policy_fn is None else policy_fn(obs)
@@ -152,6 +193,16 @@ def run_episode(env, policy_fn, seed):
             calm_dist_sum += dist
             calm_steps += 1
 
+        action = np.asarray(action, dtype=np.float64)
+        if calm and prev_calm:
+            change_sum += float(np.mean(np.abs(action - prev_action)))  # mean over both axes
+            sign_flips += int(np.sum(
+                (action * prev_action < 0.0)
+                & (np.abs(action) > SIGN_FLIP_MIN_ACTION)
+                & (np.abs(prev_action) > SIGN_FLIP_MIN_ACTION)))        # both axes
+            calm_pairs += 1
+        prev_action, prev_calm = action, calm
+
     steps = env.step_count
     survived = bool(truncated and not terminated)
 
@@ -173,6 +224,11 @@ def run_episode(env, policy_fn, seed):
         "fail_disturbance_active": np.nan,
         "fail_disturbance_magnitude": np.nan,
         "fail_time_since_pulse_s": np.nan,
+        # Mean |a_t - a_{t-1}| per axis over calm steps [-], and sign changes of
+        # the action per second of calm time, averaged over the two axes [1/s].
+        "action_change_calm": change_sum / calm_pairs if calm_pairs > 0 else np.nan,
+        "sign_flips_per_s": (sign_flips / (2.0 * calm_pairs * dt)
+                             if calm_pairs > 0 else np.nan),
     }
     if not survived:
         # State of the disturbance in the step in which the ball left the tray.
@@ -402,6 +458,112 @@ def save_heatmap(rows, conditions, policy, path):
     plt.close(fig)
 
 
+# ---------------------------------------------------------- realism evaluation
+def evaluate_realism(settings, policies, n_episodes):
+    """Run the policies on the full-range cell under each realism setting.
+
+    Args:
+        settings: sequence of (label, extra environment arguments).
+        policies: list of (name, policy_fn).
+        n_episodes: seeds 0 .. n_episodes-1 are used for every setting.
+
+    Returns:
+        list of per-episode dicts (rows of the realism csv file).
+    """
+    rows = []
+    for label, extra in settings:
+        parameters = dict(REALISM_DEFAULTS, **extra)
+        env = BallOnTrayEnv(friction_range=FULL_FRICTION_RANGE,
+                            disturbance_range=FULL_DISTURBANCE_RANGE,
+                            render_mode=None, **parameters)
+        for name, policy_fn in policies:
+            for seed in range(n_episodes):
+                row = run_episode(env, policy_fn, seed)
+                row.update(parameters)
+                row["setting"] = label
+                row["policy"] = name
+                rows.append(row)
+        env.close()
+    return rows
+
+
+def summarise_realism(cell_rows):
+    """Aggregate the rows of one realism setting and one policy."""
+    summary = summarise(cell_rows)
+    summary["action_change"] = nan_mean([r["action_change_calm"] for r in cell_rows])
+    summary["sign_flips"] = nan_mean([r["sign_flips_per_s"] for r in cell_rows])
+    return summary
+
+
+def print_realism_table(rows, settings, policy_names):
+    """Print one line per realism setting with the policies side by side."""
+    left, right = policy_names
+    n_episodes = len([r for r in rows if r["setting"] == settings[0][0] and r["policy"] == left])
+    print("Full randomisation range (c_rr in {}, |a_base| in {} m/s^2), {} seeds per setting."
+          .format(FULL_FRICTION_RANGE, FULL_DISTURBANCE_RANGE, n_episodes))
+    print("Metrics are shown as {} | {}; the gains are the same in every setting.".format(
+        left.upper(), right.upper()))
+    print("  surv %   episodes that lasted all 500 steps")
+    print("  return   mean +- std of the episode return (maximum {:.0f})".format(MAX_RETURN))
+    print("  % max    mean return as a percentage of the maximum")
+    print("  sse mm   mean true distance to the centre during calm steps, survivors only")
+    print("  goal %   share of steps inside the 2 cm goal zone")
+    print("  |da|     mean |a_t - a_(t-1)| per axis during calm steps (action units)")
+    print("  flips/s  sign changes of the action per second during calm steps, per axis")
+    print("           (only actions larger than {:g} in magnitude are counted)".format(
+        SIGN_FLIP_MIN_ACTION))
+    print("")
+    header = "{:<17} {:^13} {:^27} {:^13} {:^13} {:^13} {:^15} {:^13}".format(
+        "setting", "surv %", "return", "% max", "sse mm", "goal %", "|da|", "flips/s")
+    print(header)
+    print("-" * len(header))
+    for label, _ in settings:
+        a = summarise_realism([r for r in rows if r["setting"] == label and r["policy"] == left])
+        b = summarise_realism([r for r in rows if r["setting"] == label and r["policy"] == right])
+        print("{:<17} {:>5.0f} | {:<5.0f} {:>6.1f}+-{:<5.1f}|{:>6.1f}+-{:<5.1f} "
+              "{:>5.1f} | {:<5.1f} {:>5} | {:<5} {:>5.1f} | {:<5.1f} {:>6} | {:<6} "
+              "{:>5} | {:<5}".format(
+                  label, a["survival_pct"], b["survival_pct"],
+                  a["return_mean"], a["return_std"], b["return_mean"], b["return_std"],
+                  a["return_pct"], b["return_pct"],
+                  fmt(a["sse_mm"], "{:.1f}"), fmt(b["sse_mm"], "{:.1f}"),
+                  a["goal_pct"], b["goal_pct"],
+                  fmt(a["action_change"], "{:.4f}"), fmt(b["action_change"], "{:.4f}"),
+                  fmt(a["sign_flips"], "{:.1f}"), fmt(b["sign_flips"], "{:.1f}")))
+    print("")
+
+
+def save_realism_csv(rows, path):
+    """Write one row per episode of the realism evaluation."""
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=REALISM_CSV_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row[key] for key in REALISM_CSV_FIELDS})
+
+
+def run_realism(args, custom, start):
+    """Realism mode: the predefined sweep, or the ideal and one custom setting."""
+    if args.realism_sweep:
+        settings = REALISM_SETTINGS
+        file_name = "eval_realism.csv"
+    else:
+        settings = (("ideal", {}), ("custom", custom))
+        file_name = "eval_realism_custom.csv"
+
+    gain, _ = design_lqr()
+    policies = [("pd", pd_policy), ("lqr", make_lqr_policy(gain))]
+    rows = evaluate_realism(settings, policies, args.episodes)
+    print_realism_table(rows, settings, ("pd", "lqr"))
+
+    if not os.path.isdir(args.out_dir):
+        os.makedirs(args.out_dir)
+    path = os.path.join(args.out_dir, file_name)
+    save_realism_csv(rows, path)
+    print("saved {} episodes to {}".format(len(rows), path))
+    print("\ntotal time: {:.1f} s".format(time.perf_counter() - start))
+
+
 # ------------------------------------------------------------------------- main
 def parse_args():
     """Parse the command line."""
@@ -411,6 +573,19 @@ def parse_args():
                             DEFAULT_EPISODES))
     parser.add_argument("--out-dir", default="results",
                         help="directory for the csv file and the heat maps (default: results)")
+    realism = parser.add_argument_group(
+        "realism evaluation (full-range cell only; writes eval_realism*.csv instead of "
+        "the default files)")
+    realism.add_argument("--realism-sweep", action="store_true",
+                         help="compare the predefined realism settings")
+    realism.add_argument("--pos-noise-std", type=float, default=0.0, metavar="M",
+                         help="position noise standard deviation [m] (default: 0)")
+    realism.add_argument("--vel-noise-std", type=float, default=0.0, metavar="M_PER_S",
+                         help="velocity noise standard deviation [m/s] (default: 0)")
+    realism.add_argument("--actuator-tau", type=float, default=0.0, metavar="S",
+                         help="actuator lag time constant [s] (default: 0)")
+    realism.add_argument("--action-delay-steps", type=int, default=0, metavar="K",
+                         help="action delay in control steps (default: 0)")
     return parser.parse_args()
 
 
@@ -418,6 +593,12 @@ def main():
     """Run the evaluation, print the tables and save the files."""
     args = parse_args()
     start = time.perf_counter()
+
+    custom = {"pos_noise_std": args.pos_noise_std, "vel_noise_std": args.vel_noise_std,
+              "actuator_tau": args.actuator_tau, "action_delay_steps": args.action_delay_steps}
+    if args.realism_sweep or custom != REALISM_DEFAULTS:
+        run_realism(args, custom, start)
+        return
 
     gain, _ = design_lqr()
     # (name, policy function, only on the full-range cell)
