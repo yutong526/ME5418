@@ -5,16 +5,27 @@ realism parameters were added. ``test_realism.py`` replays the same seeds and
 actions and compares the result with the stored file, so any change to the
 default behaviour is detected.
 
+IMPORTANT: run this script only on the code from before the realism changes
+(commit 46fcb1f, tag ``pre-realism``). Do not regenerate the snapshot after
+that: a file produced by later code would only compare the code with itself
+and the regression test would no longer prove anything.
+
 What is recorded:
-    * two configurations:
+    * two trajectory configurations:
         "default"  BallOnTrayEnv()
         "full"     friction_range=(0.005, 0.05), disturbance_range=(0.5, 2.0)
-    * seeds 0..9; for each seed the environment is reset 3 times in a row, the
-      first time with ``reset(seed=seed)`` and then twice without a seed, so
-      the continuation of the random stream is covered as well
-    * after every reset, 200 steps with a fixed action sequence drawn from an
-      independent generator (not the environment's). Stepping continues after
-      the ball has left the tray, so every episode has exactly 200 steps.
+      with seeds 0..9. For each seed the environment is reset 3 times in a
+      row, the first time with ``reset(seed=seed)`` and then twice without a
+      seed, so the continuation of the random stream is covered as well.
+      After every reset, 200 steps follow with a fixed action sequence drawn
+      from an independent generator (not the environment's). Stepping
+      continues after the ball has left the tray, so every episode has exactly
+      200 steps.
+    * one time-limit configuration:
+        "truncation"  BallOnTrayEnv(max_steps=500), all-zero actions
+      with seeds 0..4, 3 consecutive resets each and the full 500 steps. The
+      ball stays at rest, so ``truncated`` becomes True at step 500, the path
+      the two configurations above never reach.
     * per step: obs, reward, terminated, truncated and the numeric info fields;
       per reset: the initial obs, c_rr, ball position and the disturbance plan
 
@@ -55,6 +66,12 @@ CONFIGS = (
     ("full", {"friction_range": (0.005, 0.05), "disturbance_range": (0.5, 2.0)}),
 )
 
+# Time-limit configuration: zero actions until the episode is truncated.
+TRUNCATION_NAME = "truncation"
+TRUNCATION_KWARGS = {"max_steps": 500}
+TRUNCATION_SEEDS = tuple(range(5))
+TRUNCATION_STEPS = 500
+
 REWARD_TERM_KEYS = ("distance", "goal_bonus", "action_rate",
                     "action_magnitude", "out_of_bounds")
 
@@ -94,18 +111,25 @@ def plan_array(env):
     return plan
 
 
-def record(make_env, actions):
+def make_truncation_actions():
+    """All-zero actions for the time-limit configuration, (seeds, resets, steps, 2)."""
+    return np.zeros((len(TRUNCATION_SEEDS), N_RESETS, TRUNCATION_STEPS, 2), dtype=np.float64)
+
+
+def record(make_env, actions, seeds=SEEDS):
     """Run the snapshot protocol on one configuration.
 
     Args:
         make_env: function without arguments that builds the environment.
-        actions: array from ``make_actions``.
+        actions: action sequences of shape (seeds, resets, steps, 2).
+        seeds: the seeds, one per first index of ``actions``.
 
     Returns:
         dict of arrays, each with leading shape (seeds, resets[, steps]).
     """
-    n_seeds = len(SEEDS)
-    lead = (n_seeds, N_RESETS, N_STEPS)
+    n_seeds = len(seeds)
+    n_steps = actions.shape[2]
+    lead = (n_seeds, N_RESETS, n_steps)
     data = {
         "obs": np.zeros(lead + (18,), dtype=np.float32),
         "reward": np.zeros(lead, dtype=np.float64),
@@ -126,7 +150,7 @@ def record(make_env, actions):
         "reset_n_pulses": np.zeros((n_seeds, N_RESETS), dtype=np.int64),
     }
 
-    for i, seed in enumerate(SEEDS):
+    for i, seed in enumerate(seeds):
         env = make_env()
         for j in range(N_RESETS):
             # Only the first reset is seeded; the next two continue the stream.
@@ -137,7 +161,7 @@ def record(make_env, actions):
             data["reset_plan"][i, j] = plan_array(env)
             data["reset_n_pulses"][i, j] = len(env.disturbances)
 
-            for t in range(N_STEPS):
+            for t in range(n_steps):
                 obs, reward, terminated, truncated, info = env.step(actions[i, j, t])
                 data["obs"][i, j, t] = obs
                 data["reward"][i, j, t] = reward
@@ -164,6 +188,11 @@ def record_all():
         data = record(lambda kwargs=kwargs: BallOnTrayEnv(**kwargs), actions)
         for key, value in data.items():
             snapshot["{}/{}".format(name, key)] = value
+
+    data = record(lambda: BallOnTrayEnv(**TRUNCATION_KWARGS),
+                  make_truncation_actions(), TRUNCATION_SEEDS)
+    for key, value in data.items():
+        snapshot["{}/{}".format(TRUNCATION_NAME, key)] = value
     return snapshot
 
 
@@ -195,6 +224,12 @@ def main():
                   int(on_tray.sum()), int(np.any(terminated, axis=-1).sum()),
                   int(active.sum()), int((active & on_tray).sum()),
                   snapshot[name + "/reset_c_rr"].min(), snapshot[name + "/reset_c_rr"].max()))
+    truncated = snapshot[TRUNCATION_NAME + "/truncated"]
+    print("{:<8}: {} episodes x {} steps, truncated only at the last step in {} episodes, "
+          "terminated steps {}".format(
+              TRUNCATION_NAME, truncated.shape[0] * truncated.shape[1], truncated.shape[2],
+              int((truncated[..., -1] & ~np.any(truncated[..., :-1], axis=-1)).sum()),
+              int(snapshot[TRUNCATION_NAME + "/terminated"].sum())))
 
 
 if __name__ == "__main__":
