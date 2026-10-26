@@ -4,7 +4,11 @@ channels:
 dependencies:
   - python=3.7
   - pip:
+    # CPU-only PyTorch: on Linux and Windows pip takes torch 1.13.1+cpu from this
+    # index instead of the much larger CUDA build from PyPI.
+    - --extra-index-url https://download.pytorch.org/whl/cpu
     - gym==0.26.2
     - numpy==1.21.6
     - matplotlib==3.5.3
-    - moviepy==1.0.3        
+    - moviepy==1.0.3
+    - torch==1.13.1

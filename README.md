@@ -62,13 +62,19 @@ ME5418_BallOnTray/
 ├── README.md
 ├── environment.yml
 ├── demo.py
+├── demo_network.py
 ├── ball_on_tray_gym.py
 ├── controllers.py
 ├── evaluate_baselines.py
+├── networks/
+│   ├── __init__.py
+│   ├── actor_critic.py
+│   └── experiments.py
 ├── tests/
 │   ├── test_env.py
 │   ├── test_renderer_3d.py
 │   ├── test_realism.py
+│   ├── test_networks.py
 │   ├── make_golden.py
 │   └── golden_v1.npz
 ├── media/
@@ -82,9 +88,13 @@ ME5418_BallOnTray/
 | `ball_on_tray_gym.py` | The environment class `BallOnTrayEnv` (dynamics, reward, observation) and the 3D renderer `TrayRenderer3D`, drawn with matplotlib's mplot3d. The renderer only reads the environment and does not change it; it is used by `BallOnTrayEnv.render()` and by `demo.py`. |
 | `controllers.py` | The PD and LQR baseline controllers, used by `demo.py` and `evaluate_baselines.py`. |
 | `evaluate_baselines.py` | Batch evaluation of the PD and LQR controllers without rendering. |
+| `networks/actor_critic.py` | The actor-critic networks (PyTorch) for the learning agent: baseline and asymmetric variant. |
+| `networks/experiments.py` | Two small supervised experiments with the networks: behaviour cloning of the LQR, and the critic comparison. |
+| `demo_network.py` | Demo of the networks: structure, forward pass, backward pass, closed loop; `--bc` and `--critics` run the experiments. |
 | `tests/test_env.py` | Tests of the environment. |
 | `tests/test_renderer_3d.py` | Tests of the 3D renderer (image format, tilt direction, ball on the tray surface). |
 | `tests/test_realism.py` | Tests of the optional realism parameters, including the regression check against `tests/golden_v1.npz`. |
+| `tests/test_networks.py` | Tests of the networks (shapes, action range, gradients, determinism, save and load). |
 | `tests/make_golden.py`, `tests/golden_v1.npz` | The script that recorded the trajectory snapshot, and the snapshot itself. They are kept as a record: `make_golden.py` does not need to be run again and the snapshot must not be regenerated. |
 | `environment.yml` | Conda environment. |
 | `media/` | Recorded demo (`demo_3d.gif`). |
@@ -140,6 +150,7 @@ When the LQR controller is used (`lqr` or `all`), its gain and closed-loop poles
 python tests/test_env.py            # the environment
 python tests/test_renderer_3d.py    # the 3D renderer
 python tests/test_realism.py        # the optional realism parameters and the regression check
+python tests/test_networks.py       # the neural networks
 ```
 
 Each script prints one line per test and ends with `All N tests passed.` No test framework is needed. `tests/test_realism.py` compares the environment with the recorded snapshot `tests/golden_v1.npz`; `tests/make_golden.py` only documents how that snapshot was recorded and is not run again.
@@ -153,6 +164,41 @@ python evaluate_baselines.py --realism-sweep    # PD and LQR under the realism p
 ```
 
 Nothing is rendered. The script prints a table that compares the PD and LQR controllers over a grid of rolling resistance and disturbance strength. The full evaluation (100 seeds per condition) writes its csv file and heat maps to `results/`. A run with any other `--episodes` value writes to `results_quick/` instead, so a quick check never replaces the full results; `results_quick/` is ignored by git. `--out-dir some_folder` chooses another folder in either case.
+
+## Neural network
+
+The networks for the learning agent (PPO) are in `networks/actor_critic.py`, written with PyTorch 1.13.1 (CPU). Two separate multilayer perceptrons, without a shared trunk:
+
+| Network | Layers | Output |
+|---|---|---|
+| Actor | 18 → 128 → 64 → 2, ReLU | Mean action, squashed to [−1, 1] by tanh. The standard deviation is a learned parameter that does not depend on the state (initial log std −0.5). |
+| Critic | 18 → 128 → 64 → 1, ReLU | State value V(s). |
+
+The observation is a short vector of 18 numbers, not an image, so a convolutional network has nothing to exploit, and the three stacked frames already contain velocity and recent history, so a recurrent network is not needed. Weights are initialised orthogonally; the actor's output layer starts with a small gain so that the first actions are close to zero (a level tray).
+
+A sampled action can leave [−1, 1]. Its log-probability is computed for the raw sample, and only the action passed to `env.step` is clipped (`ActorCritic.act` returns both).
+
+**Asymmetric variant.** `ActorCritic(privileged_dim=3)` gives the critic three extra inputs that the actor never sees: the rolling resistance coefficient and the current base acceleration, read from the `info` dict of the environment (`privileged_features(info)`). The critic is only needed during training, so the actor still uses only the 18-number observation.
+
+Run the demo and the tests:
+
+```bash
+python demo_network.py                          # structure, forward and backward pass, closed loop
+python demo_network.py --variant asymmetric     # the same for the asymmetric variant
+python demo_network.py --bc                     # behaviour cloning of the LQR (about 1 minute)
+python demo_network.py --critics                # baseline vs asymmetric critic (about 1 minute)
+python demo_network.py --bc --realistic          # the same, plus the realistic condition (also --critics)
+python tests/test_networks.py
+```
+
+The two experiments train on LQR rollouts from seeds 1000–1199, validate on seeds 2000–2049, and (behaviour cloning only) evaluate in closed loop on seeds 0–99, the same seeds as `evaluate_baselines.py`:
+
+- **Behaviour cloning**: the actor learns to imitate the LQR controller from data. In closed loop the cloned actor survives all 100 episodes with a return of 724.3 ± 8.5, against 724.4 ± 8.3 for the LQR itself. This shows that the network can represent and learn a good policy; it is not the learning method of the project.
+- **Critic comparison**: both critics are fitted to the same discounted returns (γ = 0.98, only the first 250 steps of each episode, so that the 500-step limit does not bias the targets). The asymmetric critic has a 24 % lower validation error on average over three network seeds. This measures how much information the hidden quantities carry about the return of this data; it does not show anything about PPO training yet.
+
+With `--realistic`, both experiments are also run with the settings of `demo.py --realistic` (observation noise, actuator lag, one-step delay) and reported next to the ideal condition. Behaviour cloning keeps the actor trained on the clean data and only evaluates it, next to the LQR, in the realistic environment: there the cloned actor reaches 615.6 ± 130.7 (95 % survival) against 627.4 ± 111.1 (97 %) for the LQR. The critic comparison collects new data in the realistic environment, where the LQR that collects it sees the noisy observation; the asymmetric critic's validation error is 21 % lower overall (41 % lower during disturbance pulses, 13 % lower without). As in the ideal case, this measures information content only.
+
+The PPO training loop itself is the next part of the project.
 
 ## Optional realism parameters
 
