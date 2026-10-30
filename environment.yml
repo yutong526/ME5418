@@ -3,12 +3,14 @@ channels:
   - defaults
 dependencies:
   - python=3.7
+  - pip
   - pip:
     # CPU-only PyTorch: on Linux and Windows pip takes torch 1.13.1+cpu from this
-    # index instead of the much larger CUDA build from PyPI.
+    # index instead of the much larger CUDA build from PyPI. torch 1.13.1 is the
+    # last release with Python 3.7 wheels. GIFs are written with Pillow, which
+    # comes with matplotlib.
     - --extra-index-url https://download.pytorch.org/whl/cpu
     - gym==0.26.2
     - numpy==1.21.6
     - matplotlib==3.5.3
-    - moviepy==1.0.3
     - torch==1.13.1

@@ -41,8 +41,9 @@ r = (1 − dist / d_max) + 0.5 · [dist < 0.02 m] − 0.05 · ‖a_t − a_(t−
 ```bash
 conda env create -f environment.yml     # 1. create the environment (only once)
 conda activate me5418-ballontray        # 2. activate it (in every new terminal)
-python demo.py                          # 3. run the demo: random policy, then LQR controller
-python tests/test_env.py                # 4. run the environment tests
+python demo_network.py                  # 3. network demo: forward and backward pass of PPO and SAC
+python tests/test_networks.py           # 4. network tests
+python demo.py                          # 5. environment demo: random policy, then LQR controller
 ```
 
 Activate the environment in every new terminal before running anything, otherwise `gym` will not be found or a wrong version will be used; in VS Code, also select `me5418-ballontray` as the Python interpreter.
@@ -69,6 +70,8 @@ ME5418_BallOnTray/
 ├── networks/
 │   ├── __init__.py
 │   ├── actor_critic.py
+│   ├── sac.py
+│   ├── losses.py
 │   └── experiments.py
 ├── tests/
 │   ├── test_env.py
@@ -88,18 +91,20 @@ ME5418_BallOnTray/
 | `ball_on_tray_gym.py` | The environment class `BallOnTrayEnv` (dynamics, reward, observation) and the 3D renderer `TrayRenderer3D`, drawn with matplotlib's mplot3d. The renderer only reads the environment and does not change it; it is used by `BallOnTrayEnv.render()` and by `demo.py`. |
 | `controllers.py` | The PD and LQR baseline controllers, used by `demo.py` and `evaluate_baselines.py`. |
 | `evaluate_baselines.py` | Batch evaluation of the PD and LQR controllers without rendering. |
-| `networks/actor_critic.py` | The actor-critic networks (PyTorch) for the learning agent: baseline and asymmetric variant. |
+| `networks/actor_critic.py` | The PPO actor-critic networks (PyTorch): baseline and asymmetric variant. |
+| `networks/sac.py` | The SAC networks: tanh-squashed Gaussian actor and twin Q critics. |
+| `networks/losses.py` | The PPO clipped loss, the SAC critic and actor losses, and the returns and advantages of a rollout. |
 | `networks/experiments.py` | Two small supervised experiments with the networks: behaviour cloning of the LQR, and the critic comparison. |
-| `demo_network.py` | Demo of the networks: structure, forward pass, backward pass, closed loop; `--bc` and `--critics` run the experiments. |
+| `demo_network.py` | Demo of the networks: construction, PPO forward and backward pass, SAC forward and backward pass, closed loop; `--bc` and `--critics` run the experiments. |
 | `tests/test_env.py` | Tests of the environment. |
 | `tests/test_renderer_3d.py` | Tests of the 3D renderer (image format, tilt direction, ball on the tray surface). |
 | `tests/test_realism.py` | Tests of the optional realism parameters, including the regression check against `tests/golden_v1.npz`. |
-| `tests/test_networks.py` | Tests of the networks (shapes, action range, gradients, determinism, save and load). |
+| `tests/test_networks.py` | Tests of the networks and losses (shapes, action range, probability formulas, tanh correction, gradients, determinism, save and load). |
 | `tests/make_golden.py`, `tests/golden_v1.npz` | The script that recorded the trajectory snapshot, and the snapshot itself. They are kept as a record: `make_golden.py` does not need to be run again and the snapshot must not be regenerated. |
 | `environment.yml` | Conda environment. |
 | `media/` | Recorded demo (`demo_3d.gif`). |
 | `results/` | Output of `evaluate_baselines.py`. |
-| `report/` | Project report. |
+| `report/` | Project report (`ME5418_NeuralNetwork_Report.pdf`, written from the `.html` file next to it). |
 
 ## How to Run the Demo
 
@@ -150,10 +155,10 @@ When the LQR controller is used (`lqr` or `all`), its gain and closed-loop poles
 python tests/test_env.py            # the environment
 python tests/test_renderer_3d.py    # the 3D renderer
 python tests/test_realism.py        # the optional realism parameters and the regression check
-python tests/test_networks.py       # the neural networks
+python tests/test_networks.py       # the neural networks and their losses
 ```
 
-Each script prints one line per test and ends with `All N tests passed.` No test framework is needed. `tests/test_realism.py` compares the environment with the recorded snapshot `tests/golden_v1.npz`; `tests/make_golden.py` only documents how that snapshot was recorded and is not run again.
+Each script prints one line per test and ends with `All N tests passed.` (14, 7, 8 and 19 tests). No test framework is needed. `tests/test_realism.py` compares the environment with the recorded snapshot `tests/golden_v1.npz`; `tests/make_golden.py` only documents how that snapshot was recorded and is not run again.
 
 ## Evaluating the baselines
 
@@ -167,38 +172,53 @@ Nothing is rendered. The script prints a table that compares the PD and LQR cont
 
 ## Neural network
 
-The networks for the learning agent (PPO) are in `networks/actor_critic.py`, written with PyTorch 1.13.1 (CPU). Two separate multilayer perceptrons, without a shared trunk:
+The proposal trains PPO as the baseline and SAC as the more sample-efficient alternative. The networks of both are in `networks/`, written directly with PyTorch 1.13.1 (CPU), without a reinforcement-learning framework. Every network is a multilayer perceptron with the hidden sizes of the proposal (128 and 64, ReLU):
 
-| Network | Layers | Output |
-|---|---|---|
-| Actor | 18 → 128 → 64 → 2, ReLU | Mean action, squashed to [−1, 1] by tanh. The standard deviation is a learned parameter that does not depend on the state (initial log std −0.5). |
-| Critic | 18 → 128 → 64 → 1, ReLU | State value V(s). |
+| Network | File | Layers | Output | Parameters |
+|---|---|---|---|---|
+| PPO actor | `actor_critic.py` | 18 → 128 → 64 → 2 | Mean action, squashed to [−1, 1] by tanh. The standard deviation is a learned parameter that does not depend on the state (initial log std −0.5). | 10,820 |
+| PPO critic | `actor_critic.py` | 18 → 128 → 64 → 1 | State value V(s). | 10,753 |
+| SAC actor | `sac.py` | 18 → 128 → 64 → 2 + 2 | Mean and log std of a Gaussian (log std clamped to [−20, 2]); the sample is squashed by tanh into (−1, 1). | 10,948 |
+| SAC critic | `sac.py` | (18 + 2) → 128 → 64 → 1, twice | Two independent Q-values Q1(s, a), Q2(s, a). | 22,018 |
 
-The observation is a short vector of 18 numbers, not an image, so a convolutional network has nothing to exploit, and the three stacked frames already contain velocity and recent history, so a recurrent network is not needed. Weights are initialised orthogonally; the actor's output layer starts with a small gain so that the first actions are close to zero (a level tray).
+The observation is a short vector of 18 numbers, not an image, so a convolutional network has nothing to exploit, and the three stacked frames already contain velocity and recent history, so a recurrent network is not needed. Weights are initialised orthogonally (gain √2 on hidden layers, 0.01 on the policy outputs, 1 on value and Q outputs), so the first actions are close to zero (a level tray).
 
-A sampled action can leave [−1, 1]. Its log-probability is computed for the raw sample, and only the action passed to `env.step` is clipped (`ActorCritic.act` returns both).
+**Action range.** The two algorithms bound the action differently. For PPO a sampled action can leave [−1, 1]; its log-probability is computed for the raw sample, and only the action passed to `env.step` is clipped (`ActorCritic.act` returns both). SAC needs the density of the action it applies, so its actor squashes the sample with tanh and corrects the log-probability by the log-determinant of the squashing, computed in the numerically stable form `2 (log 2 − u − softplus(−2u))`.
 
-**Asymmetric variant.** `ActorCritic(privileged_dim=3)` gives the critic three extra inputs that the actor never sees: the rolling resistance coefficient and the current base acceleration, read from the `info` dict of the environment (`privileged_features(info)`). The critic is only needed during training, so the actor still uses only the 18-number observation.
+**Asymmetric variant.** `ActorCritic(privileged_dim=3)` gives the PPO critic three extra inputs that the actor never sees: the rolling resistance coefficient and the current base acceleration, read from the `info` dict of the environment (`privileged_features(info)`). The critic is only needed during training, so the actor still uses only the 18-number observation (critic: 11,137 parameters).
+
+**Losses.** `networks/losses.py` holds the clipped PPO objective (policy + 0.5 · value − 0.01 · entropy, ε = 0.2), the SAC critic loss against the entropy-regularised twin-Q target, the SAC actor loss E[α log π − Q1] (α = 0.2) and the discounted returns and normalised advantages of a rollout. The demo, the tests and the training loop of the next stage use the same functions.
 
 Run the demo and the tests:
 
 ```bash
-python demo_network.py                          # structure, forward and backward pass, closed loop
-python demo_network.py --variant asymmetric     # the same for the asymmetric variant
+python demo_network.py                          # the five sections below
+python demo_network.py --variant asymmetric     # the same with the asymmetric PPO critic
+python demo_network.py --seed 7                 # another seed
 python demo_network.py --bc                     # behaviour cloning of the LQR (about 1 minute)
 python demo_network.py --critics                # baseline vs asymmetric critic (about 1 minute)
-python demo_network.py --bc --realistic          # the same, plus the realistic condition (also --critics)
+python demo_network.py --bc --realistic         # the same, plus the realistic condition (also --critics)
 python tests/test_networks.py
 ```
 
+`python demo_network.py` prints five sections, all seeded so that two runs print identical numbers:
+
+1. **Construction**: the layers and parameter counts of the PPO actor-critic, the SAC actor and the SAC critics.
+2. **PPO forward pass** on a real observation from `env.reset`: mean, standard deviation, sampled and clipped action, log-probability, entropy, value.
+3. **PPO backward pass**: a 64-step rollout with the untrained policy, the clipped PPO loss, `.backward()`, the gradient norm of every parameter tensor, one Adam step, and the loss before and after.
+4. **SAC forward and backward pass** on the same transitions: twin-Q critic loss and reparameterised actor loss, their gradients, one Adam step each, and a check of the tanh correction against the direct formula.
+5. **Closed loop**: the untrained PPO policy drives one full episode.
+
 The two experiments train on LQR rollouts from seeds 1000–1199, validate on seeds 2000–2049, and (behaviour cloning only) evaluate in closed loop on seeds 0–99, the same seeds as `evaluate_baselines.py`:
 
-- **Behaviour cloning**: the actor learns to imitate the LQR controller from data. In closed loop the cloned actor survives all 100 episodes with a return of 724.3 ± 8.5, against 724.4 ± 8.3 for the LQR itself. This shows that the network can represent and learn a good policy; it is not the learning method of the project.
-- **Critic comparison**: both critics are fitted to the same discounted returns (γ = 0.98, only the first 250 steps of each episode, so that the 500-step limit does not bias the targets). The asymmetric critic has a 24 % lower validation error on average over three network seeds. This measures how much information the hidden quantities carry about the return of this data; it does not show anything about PPO training yet.
+- **Behaviour cloning**: the PPO actor learns to imitate the LQR controller from data. In closed loop the cloned actor survives all 100 episodes with a return of 724.3 ± 8.5, against 724.4 ± 8.3 for the LQR itself. This shows that the network can represent and learn a good policy; it is not the learning method of the project.
+- **Critic comparison**: both PPO critics are fitted to the same discounted returns (γ = 0.98, only the first 250 steps of each episode, so that the 500-step limit does not bias the targets). The asymmetric critic has a 24 % lower validation error on average over three network seeds. This measures how much information the hidden quantities carry about the return of this data; it does not show anything about PPO training yet.
 
-With `--realistic`, both experiments are also run with the settings of `demo.py --realistic` (observation noise, actuator lag, one-step delay) and reported next to the ideal condition. Behaviour cloning keeps the actor trained on the clean data and only evaluates it, next to the LQR, in the realistic environment: there the cloned actor reaches 615.6 ± 130.7 (95 % survival) against 627.4 ± 111.1 (97 %) for the LQR. The critic comparison collects new data in the realistic environment, where the LQR that collects it sees the noisy observation; the asymmetric critic's validation error is 21 % lower overall (41 % lower during disturbance pulses, 13 % lower without). As in the ideal case, this measures information content only.
+With `--realistic`, both experiments are also run with the settings of `demo.py --realistic` (observation noise, actuator lag, one-step delay) and reported next to the ideal condition. Behaviour cloning keeps the actor trained on the clean data and only evaluates it, next to the LQR, in the realistic environment: there the cloned actor reaches 616.0 ± 132.0 (94 % survival) against 627.4 ± 111.1 (97 %) for the LQR. The critic comparison collects new data in the realistic environment, where the LQR that collects it sees the noisy observation; the asymmetric critic's validation error is 20 % lower overall (38 % lower during disturbance pulses, 13 % lower without). As in the ideal case, this measures information content only.
 
-The PPO training loop itself is the next part of the project.
+The numbers above were measured on Windows 11 with the pinned environment. Every run on one machine prints identical numbers, but floating-point details differ between platforms. The ideal-condition results were the same on another machine; the realistic-condition results differed slightly there (cloned actor 615.6 ± 130.7 with 95 % survival; critic errors 21 %, 41 % and 13 % lower).
+
+The training loops of PPO and SAC are the next part of the project.
 
 ## Optional realism parameters
 
@@ -225,22 +245,3 @@ Details:
 - Order inside one step: delay queue, commanded tilt, actuator lag, actual tilt, ball dynamics.
 
 `python tests/test_realism.py` tests these parameters. `python evaluate_baselines.py --realism-sweep` compares the PD and LQR baselines under them and writes `results/eval_realism.csv`.
-
-## Changes since the first public version
-
-This lists what changed compared with the version first uploaded to the public repository (the one with `demo.py`, `demo_3d.py`, `demo_lqr.py` and the tests in the project root).
-
-| Change | Files | What and why |
-|---|---|---|
-| Added | `controllers.py` | The PD and LQR controllers, moved out of `demo.py` and `demo_lqr.py` so that the demo and the evaluation share one copy. Gains and design parameters are unchanged. |
-| Added | `evaluate_baselines.py`, `results/` | Batch evaluation of PD and LQR over a grid of conditions, and its stored results. |
-| Added | `tests/test_realism.py`, `tests/make_golden.py`, `tests/golden_v1.npz` | Tests of the realism parameters and a recorded trajectory snapshot that proves the default behaviour did not change. |
-| Removed | `demo_3d.py`, `demo_lqr.py` | Merged into `demo.py`. `demo_lqr.py --compare N` is replaced by `evaluate_baselines.py --episodes N`. |
-| Removed | `media/demo.gif`, the 2D view | The project now shows the 3D view only. The `--view` argument no longer exists. |
-| Moved | `test_env.py`, `test_renderer_3d.py` → `tests/` | Run them as `python tests/test_env.py` and `python tests/test_renderer_3d.py`. |
-| Changed | `demo.py` | Single entry point: `--policy` gained `lqr` and `all`, `--realistic` is new, the view is always 3D. `python demo.py` now plays a random episode and then an LQR episode (before: random, then PD); `--policy pd` and `--policy all` still show the PD controller. |
-| Changed | `ball_on_tray_gym.py` | Four optional realism parameters (`pos_noise_std`, `vel_noise_std`, `actuator_tau`, `action_delay_steps`), off by default. `render()` now draws the 3D view with `TrayRenderer3D`, which was moved into this file; the 2D drawing code was removed. Dynamics, reward and observation are unchanged with default arguments. |
-| Removed | `renderer_3d.py` | The 3D renderer `TrayRenderer3D` now lives in `ball_on_tray_gym.py`, next to the environment. Import it with `from ball_on_tray_gym import TrayRenderer3D`. |
-| Changed | `README.md`, `.gitignore` | Documentation and ignore rules for the new structure. |
-
-Not included yet: `hard_mode.py` and `media/demo_hard_3d.gif`, which exist only in the public repository. `hard_mode.py` imports `demo_lqr.py` and uses the 2D view, so it has to be adapted to this structure before it can be merged.
