@@ -131,7 +131,7 @@ ME5418_BallOnTray/
 | `results/` | Output of `evaluate_baselines.py`, and of `evaluate_agent.py --csv` for the reference runs (`agents_ideal.csv`, `agents_realistic.csv`). |
 | `runs/` | Output of `train.py` (progress logs and checkpoints); not tracked by git. |
 | `trained/` | Checkpoints of the four reference runs (see [Reference runs](#reference-runs)). |
-| `report/` | Project reports: `ME5418_NeuralNetwork_Report.pdf` (stage 2) and `ME5418_Agent_Report.pdf` (stage 3, written from the `.html` file next to it). |
+| `report/` | Project report: `ME5418_Agent_Report.pdf` (stage 3), written from `ME5418_Agent_Report.html` next to it. |
 
 ## How to Run the Demo
 
