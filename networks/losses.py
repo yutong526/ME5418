@@ -1,10 +1,12 @@
 """Loss functions of PPO and SAC, shared by the demo, the tests and (stage 3) training.
 
     returns_and_advantages   discounted returns and normalised advantages of a
-                             rollout segment (plain returns; GAE is stage 3)
+                             rollout segment (plain returns, used by the demo)
+    gae                      GAE(lambda) with bootstrapping at truncation (training)
     ppo_loss                 clipped surrogate + value loss - entropy bonus
     sac_critic_loss          twin-Q regression to the entropy-regularised target
-    sac_actor_loss           E[alpha * log pi(a|s) - Q1(s, a)], reparameterised
+    sac_actor_loss           E[alpha * log pi(a|s) - Q(s, a)], reparameterised
+    sac_alpha_loss           automatic tuning of the entropy temperature alpha
 
 PPO (Schulman et al., 2017), with r_t = exp(log pi_new(a|s) - log pi_old(a|s)):
 
@@ -27,7 +29,7 @@ from torch import nn
 PPO_CLIP = 0.2          # clipping parameter epsilon
 VALUE_COEF = 0.5        # weight c_v of the value loss
 ENTROPY_COEF = 0.01     # weight c_e of the entropy bonus
-SAC_ALPHA = 0.2         # SAC entropy temperature (fixed; automatic tuning is stage 3)
+SAC_ALPHA = 0.2         # SAC entropy temperature (fixed default; training tunes it)
 
 
 def returns_and_advantages(rewards, values, dones, gamma):
@@ -53,6 +55,43 @@ def returns_and_advantages(rewards, values, dones, gamma):
     advantages = returns - values
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     return returns, advantages
+
+
+def gae(rewards, values, next_values, terminated, truncated, gamma, lam):
+    """Generalised advantage estimation, GAE(lambda) (Schulman et al., 2016).
+
+    Used by the PPO training loop in place of ``returns_and_advantages``.
+
+        delta_t = r_t + gamma (1 - term_t) V(s_(t+1)) - V(s_t)
+        A_t     = delta_t + gamma lambda (1 - done_t) A_(t+1),   done = term or trunc
+
+    ``next_values[t]`` must be V of the true next observation of step t: the
+    last observation of the episode if step t ended it, not the observation
+    after the reset. This distinguishes the two ways an episode ends. A fall
+    (``terminated``) is a true terminal state, so nothing is bootstrapped. A
+    time limit (``truncated``) is not: the ball could have stayed on the tray,
+    so the step bootstraps from V of its last observation, and only the
+    advantage chain is cut at the episode boundary.
+
+    Args:
+        rewards, values, next_values, terminated, truncated: tensors of shape
+            (T,) or (T, N) for N parallel environments, time first.
+        gamma, lam: discount factor and GAE lambda.
+
+    Returns:
+        (advantages, returns) with the shape of ``rewards``; returns =
+        advantages + values are the value targets. Advantages are not
+        normalised here (``ppo_loss`` callers normalise per minibatch).
+    """
+    term = terminated.float()
+    done = torch.max(term, truncated.float())
+    deltas = rewards + gamma * (1.0 - term) * next_values - values
+    advantages = torch.zeros_like(rewards)
+    running = torch.zeros_like(rewards[0])
+    for t in reversed(range(rewards.shape[0])):
+        running = deltas[t] + gamma * lam * (1.0 - done[t]) * running
+        advantages[t] = running
+    return advantages, advantages + values
 
 
 def ppo_loss(network, obs, actions, old_log_probs, advantages, returns, privileged=None,
@@ -105,7 +144,26 @@ def sac_critic_loss(actor, critic, target_critic, obs, actions, rewards, next_ob
     return nn.functional.mse_loss(q1, target) + nn.functional.mse_loss(q2, target)
 
 
-def sac_actor_loss(actor, critic, obs, alpha=SAC_ALPHA):
-    """E[alpha * log pi(a~|s) - Q1(s, a~)] with a reparameterised sample a~."""
+def sac_actor_loss(actor, critic, obs, alpha=SAC_ALPHA, use_min=False):
+    """E[alpha * log pi(a~|s) - Q(s, a~)] with a reparameterised sample a~.
+
+    Q is Q1 by default (as in stage 2); ``use_min=True`` uses min(Q1, Q2), as
+    the SAC training loop does, so that the actor is not pulled towards
+    actions that only one of the two critics overestimates.
+    """
     actions, log_probs = actor(obs)
-    return (alpha * log_probs - critic.q1(obs, actions)).mean()
+    if use_min:
+        q = torch.min(*critic(obs, actions))
+    else:
+        q = critic.q1(obs, actions)
+    return (alpha * log_probs - q).mean()
+
+
+def sac_alpha_loss(log_alpha, log_probs, target_entropy):
+    """Automatic entropy tuning: L(alpha) = -E[log_alpha (log pi(a|s) + H_target)].
+
+    The gradient raises alpha when the policy entropy -E[log pi] is below
+    ``target_entropy`` and lowers it when above. ``log_probs`` are detached
+    here, so this loss only trains ``log_alpha``.
+    """
+    return -(log_alpha * (log_probs.detach() + target_entropy)).mean()

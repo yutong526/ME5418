@@ -11,6 +11,8 @@ Examples:
     python demo.py --policy lqr --seed 3            # LQR only, another seed
     python demo.py --realistic                      # with noise, actuator lag and delay
     python demo.py --save-gif media/demo_3d.gif     # no window, write a gif instead
+    python demo.py --checkpoint runs/<run>/best.pt  # a trained PPO or SAC agent (train.py)
+    python demo.py --checkpoint runs/<run>/best.pt --policy lqr+agent   # LQR, then the agent
 """
 
 import argparse
@@ -44,6 +46,7 @@ POLICY_LABELS = {
     "random": "Policy: random",
     "pd": "Policy: PD controller",
     "lqr": "Policy: LQR controller",
+    "agent": "Policy: {} agent",         # filled in with PPO or SAC
 }
 REALISTIC_LABEL_SUFFIX = "\n(realistic: noise, lag, delay)"     # second line of the caption
 
@@ -54,6 +57,8 @@ POLICY_CHOICES = {
     "lqr": ("lqr",),
     "both": ("random", "lqr"),
     "all": ("random", "pd", "lqr"),
+    "agent": ("agent",),
+    "lqr+agent": ("lqr", "agent"),
 }
 
 
@@ -163,20 +168,29 @@ def save_gif(frames, path):
 def parse_args():
     """Parse the command line."""
     parser = argparse.ArgumentParser(description="Ball-on-Tray demo.")
-    parser.add_argument("--policy", choices=["random", "pd", "lqr", "both", "all"],
-                        default="both",
+    parser.add_argument("--policy", choices=sorted(POLICY_CHOICES), default=None,
                         help="policy to show; 'both' plays a random episode, then an LQR "
-                             "episode; 'all' plays random, then PD, then LQR (default: both)")
+                             "episode; 'all' plays random, then PD, then LQR; 'agent' and "
+                             "'lqr+agent' need --checkpoint (default: both, or agent when "
+                             "--checkpoint is given)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
                         help="random seed of the episode(s) (default: {})".format(DEFAULT_SEED))
     parser.add_argument("--save-gif", metavar="PATH", default=None,
                         help="do not open a window; render off-screen and save the "
                              "episode(s) to this gif file")
+    parser.add_argument("--checkpoint", metavar="PATH", default=None,
+                        help="a PPO or SAC checkpoint written by train.py "
+                             "(e.g. runs/<run>/best.pt)")
     parser.add_argument("--realistic", action="store_true",
                         help="switch on the optional realism parameters: observation noise "
                              "(0.002 m, 0.03 m/s), actuator lag (0.05 s) and a one-step "
                              "action delay")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.policy is None:
+        args.policy = "agent" if args.checkpoint else "both"
+    if "agent" in POLICY_CHOICES[args.policy] and not args.checkpoint:
+        parser.error("--policy {} needs --checkpoint".format(args.policy))
+    return args
 
 
 def main():
@@ -194,6 +208,13 @@ def main():
         gain, info = design_lqr()
         print_design(gain, info)
         policy_fns["lqr"] = make_lqr_policy(gain)
+    labels = dict(POLICY_LABELS)
+    if "agent" in policy_names:
+        from agents import load_policy        # imports torch only when needed
+        algo, policy_fns["agent"], checkpoint = load_policy(args.checkpoint)
+        labels["agent"] = POLICY_LABELS["agent"].format(algo.upper())
+        print("agent: {} checkpoint {} (step {:,})".format(
+            algo.upper(), args.checkpoint, checkpoint.get("step", 0)))
 
     # The environment itself does not render here; the 3D renderer draws it from
     # outside, which lets the demo pass the reward and control the pacing.
@@ -204,7 +225,7 @@ def main():
 
     for name in policy_names:
         # The picture says which policy is running.
-        renderer.set_label(POLICY_LABELS[name]
+        renderer.set_label(labels[name]
                            + (REALISTIC_LABEL_SUFFIX if args.realistic else ""))
         # Every policy gets the same seed, i.e. the same start position, rolling
         # resistance and disturbance schedule.

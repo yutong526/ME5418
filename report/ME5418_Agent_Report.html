@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ME5418 Learning Agent Report</title>
+<style>
+  @page { size: A4; margin: 10mm 11mm 10mm 11mm; }
+  html { font-family: "Caladea", "Cambria", serif; font-size: 8.7pt; line-height: 1.26; color: #111; }
+  body { margin: 0; }
+  h1 { font-family: "Liberation Sans", Arial, sans-serif; font-size: 13.6pt; margin: 0; color: #111; }
+  .sub { font-family: "Liberation Sans", Arial, sans-serif; font-size: 8.4pt; color: #444;
+         border-bottom: 1.2pt solid #1f4e9a; padding-bottom: 2.5pt; margin: 1pt 0 4pt 0; }
+  .abstract { border-left: 2.4pt solid #1f4e9a; background: #f3f6fb; padding: 3pt 6pt; margin: 0 0 4pt 0;
+              text-align: justify; }
+  h2 { font-family: "Liberation Sans", Arial, sans-serif; font-size: 10.6pt; color: #1f4e9a; margin: 5pt 0 1.5pt 0; }
+  h3 { font-family: "Liberation Sans", Arial, sans-serif; font-size: 9pt; color: #111; margin: 3.5pt 0 1pt 0; }
+  p { margin: 0 0 2.5pt 0; text-align: justify; }
+  code { font-family: "Liberation Mono", "DejaVu Sans Mono", monospace; font-size: 0.86em;
+         background: #eef0f3; padding: 0 1.5pt; border-radius: 1.5pt; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5pt 0 3pt 0; break-inside: avoid; }
+  th { font-family: "Liberation Sans", Arial, sans-serif; font-size: 7.9pt; text-align: left;
+       border-bottom: 0.9pt solid #333; padding: 1pt 3pt; }
+  td { border-bottom: 0.5pt solid #ccc; padding: 1pt 3pt; vertical-align: top; }
+  td.n, th.n { text-align: right; white-space: nowrap; }
+  td:first-child code { white-space: nowrap; }
+  ul { margin: 0 0 2.5pt 0; padding-left: 11pt; }
+  li { margin: 0 0 1pt 0; text-align: justify; }
+  sup, sub { line-height: 0; font-size: 0.72em; }
+  .fig { margin: 2pt 0 1pt 0; text-align: center; break-inside: avoid; }
+  .fig img { width: 90%; }
+  .cap { font-size: 7.8pt; color: #333; text-align: justify; margin: 0 0 3pt 0; }
+  .eq { text-align: center; font-style: italic; margin: 1pt 0 2.5pt 0; }
+  .run { font-family: "Liberation Mono", monospace; font-size: 7.6pt; background: #f4f4f4;
+         padding: 2pt 5pt; margin: 1pt 0 2pt 0; white-space: pre; line-height: 1.3; }
+  b { font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>Deep Reinforcement Learning for Disturbance-Robust Ball-on-Tray Balancing</h1>
+<div class="sub">ME5418 – Machine Learning in Robotics &nbsp;|&nbsp; Stage 3: Learning Agent Code &amp; Report</div>
+
+<div class="abstract">This stage turns the stage 2 networks into learning agents: complete training loops for both algorithms of the
+proposal, <b>PPO</b> and <b>SAC</b>, the proposal's <b>staged domain randomisation</b>, and the tools to evaluate a trained agent
+against the PD and LQR baselines and watch it in the 3D view. Everything is written against <code>torch.nn</code>, with no RL
+framework, and runs on one CPU core. The code is complete and runnable; first reference runs already learn: PPO reaches the
+LQR level in about 7 minutes. On the 100 test seeds PPO beats LQR on 77 of them but drops one hard start; under noise, lag and delay, PPO trained in those
+conditions beats LQR by 30 points. SAC learns faster per sample but levels off below PD.</div>
+
+<h2>1. Code Explanation</h2>
+<p>Stages 1–2 are unchanged apart from additions to <code>networks/losses.py</code> and a <code>--checkpoint</code> option in
+<code>demo.py</code>. Stage 3 adds the <code>agents/</code> package and three scripts.</p>
+<table>
+<tr><th style="width:25%">File</th><th>Content</th></tr>
+<tr><td><code>agents/common.py</code></td><td>Curriculum, parallel environments (<code>VecEnv</code>), evaluation on fixed seeds, CSV logging.</td></tr>
+<tr><td><code>agents/ppo.py</code></td><td>PPO loop: rollouts, GAE, minibatch epochs, learning-rate annealing; optional asymmetric critic.</td></tr>
+<tr><td><code>agents/sac.py</code></td><td>SAC loop: replay buffer, target critic (Polyak), automatic entropy tuning, random warm-up.</td></tr>
+<tr><td><code>networks/losses.py</code></td><td>+ <code>gae</code> (GAE(λ) with bootstrapping at truncation), + <code>sac_alpha_loss</code>, + <code>use_min</code> option of the SAC actor loss.</td></tr>
+<tr><td><code>train.py</code></td><td>Command line: <code>--algo ppo|sac</code>, <code>--curriculum</code>, <code>--realistic</code>, <code>--asymmetric</code>, <code>--quick</code>; writes <code>runs/&lt;name&gt;/</code>.</td></tr>
+<tr><td><code>evaluate_agent.py</code></td><td>Agents next to PD and LQR on the test seeds 0–99, with paired differences; <code>--realistic</code>.</td></tr>
+<tr><td><code>plot_training.py</code></td><td>Learning curves with the PD and LQR levels (Fig. 1).</td></tr>
+<tr><td><code>tests/test_agents.py</code></td><td>17 tests: GAE by hand, <code>VecEnv</code>, curriculum, replay buffer, Polyak, α direction, smoke runs, reproducibility.</td></tr>
+</table>
+
+<h3>1.1 Pipeline and shared pieces</h3>
+<p><code>train.py</code> builds a configuration (saved as <code>config.json</code>) and calls <code>train_ppo</code> or <code>train_sac</code>. Both loops
+draw experience from <code>VecEnv</code>, update the stage 2 networks with the stage 2 losses, append a row to <code>progress.csv</code>,
+and every 50k (PPO) / 10k (SAC) steps evaluate the deterministic policy on seeds 500–519, saving <code>best.pt</code> and
+<code>last.pt</code>. <b>Curriculum.</b> The proposal's "fixed friction and no disturbances first, then progressively randomise" is
+four stages: fixed c<sub>rr</sub> = 0.02, no pulses (10 % of steps) → c<sub>rr</sub> ∈ [0.005, 0.05] (15 %) → + pulses of 0.5–1.25 m s<sup>−2</sup>
+(15 %) → full range, pulses up to 2.0 m s<sup>−2</sup> (60 %); <code>--realistic</code> adds noise, lag and delay to the last stage. A stage
+changes at each environment's next episode, never inside one. <b>VecEnv</b> steps N environments and batches the network
+call. We wrote it instead of using <code>gym.vector</code> because both loops need the <i>true</i> last
+observation of an episode (and its <code>info</code>, for the asymmetric critic) separately from the observation after the automatic
+reset, and every episode needs its own seed for exact reproducibility. <b>Seeds.</b> Training episodes use seeds ≥ 100,000;
+model selection uses 500–519; the final comparison uses 0–99, the seeds of the stage 1 baseline table, seen by nothing else.</p>
+
+<h3>1.2 The two training loops</h3>
+<table>
+<tr><th style="width:17%"></th><th style="width:41%">PPO (<code>agents/ppo.py</code>)</th><th>SAC (<code>agents/sac.py</code>)</th></tr>
+<tr><td>Data</td><td>on-policy: 8 envs × 256 steps = 2,048 per iteration, used once</td><td>off-policy: 1 env, every transition kept in a 300k replay buffer; 5,000 random warm-up actions</td></tr>
+<tr><td>Update</td><td>10 epochs × minibatches of 256; clipped loss (ε = 0.2), value weight 0.5</td><td>1 update per step, batch 256: twin-Q critic, then actor, then α, then target</td></tr>
+<tr><td>Value target</td><td>GAE, γ = 0.99, λ = 0.95</td><td>r + γ(1−d)[min Q′(s′, a′) − α log π(a′|s′)] from the <b>target</b> critic, τ = 0.005</td></tr>
+<tr><td>Exploration</td><td>free log σ, no entropy bonus (σ decays 0.61 → 0.10)</td><td>α learned so that the entropy tracks −2 (= −action dim.)</td></tr>
+<tr><td>Stabilisers</td><td>advantages normalised per minibatch; grad-norm clip 0.5; lr 3·10<sup>−4</sup> → 0 linearly</td><td>actor maximises min(Q1, Q2); critic frozen during the actor's backward pass</td></tr>
+</table>
+<p>Both scale the reward by 0.1 for learning (value targets near 10 instead of 150; logs are unscaled), and both treat the two episode ends differently: a fall (<code>terminated</code>) is terminal, the 500-step limit (<code>truncated</code>) is not, so</p>
+<p class="eq">δ<sub>t</sub> = r<sub>t</sub> + γ (1 − term<sub>t</sub>) V(s<sub>t+1</sub>) − V(s<sub>t</sub>), &nbsp;&nbsp; A<sub>t</sub> = δ<sub>t</sub> + γλ (1 − done<sub>t</sub>) A<sub>t+1</sub></p>
+<p>with s<sub>t+1</sub> the <i>true</i> last observation, not the next episode's first one that an auto-resetting environment returns.
+A balanced episode always ends by truncation, so treating it as terminal would teach the critic that balancing longer is worth
+nothing; a hand-computed GAE test pins down both cases.</p>
+
+<h3>1.3 First results</h3>
+<div class="fig"><img src="../media/learning_curves.png">
+<p class="cap"><b>Fig. 1.</b> Evaluation return (deterministic policy, seeds 500–519, full range) of the reference runs, against environment
+steps and training time; dashed: LQR and PD on the same seeds. One training seed per agent, one CPU core each: PPO 1M steps in 6.6 min, SAC 200k steps in 22 min.</p></div>
+<table>
+<tr><th>Condition</th><th>Policy (one training seed each)</th><th class="n">Return</th><th class="n">Survival</th><th class="n">Goal %</th><th class="n">vs LQR, paired</th></tr>
+<tr><td rowspan="5">Ideal</td><td>PD</td><td class="n">712.6 ± 11.7</td><td class="n">100 %</td><td class="n">93.4</td><td class="n">—</td></tr>
+<tr><td>LQR</td><td class="n">724.4 ± 8.3</td><td class="n">100 %</td><td class="n">96.1</td><td class="n">—</td></tr>
+<tr><td>PPO</td><td class="n">720.0 ± 71.8</td><td class="n">99 %</td><td class="n">95.1</td><td class="n">−4.4, better on 77/100</td></tr>
+<tr><td>PPO, asymmetric critic</td><td class="n">720.6 ± 71.8</td><td class="n">99 %</td><td class="n">95.3</td><td class="n">−3.8, better on 83/100</td></tr>
+<tr><td>SAC</td><td class="n">692.0 ± 21.0</td><td class="n">100 %</td><td class="n">89.8</td><td class="n">−32.4, better on 1/100</td></tr>
+<tr><td rowspan="4">Noise, lag 0.05 s, 1-step delay</td><td>PD</td><td class="n">658.5 ± 68.3</td><td class="n">99 %</td><td class="n">86.7</td><td class="n">—</td></tr>
+<tr><td>LQR</td><td class="n">627.4 ± 111.1</td><td class="n">97 %</td><td class="n">78.8</td><td class="n">—</td></tr>
+<tr><td>PPO trained on the ideal task</td><td class="n">386.7 ± 118.3</td><td class="n">78 %</td><td class="n">13.8</td><td class="n">−240.7, better on 2/100</td></tr>
+<tr><td>PPO trained with <code>--realistic</code></td><td class="n">657.3 ± 69.8</td><td class="n">99 %</td><td class="n">81.1</td><td class="n">+29.9, better on 77/100</td></tr>
+</table>
+<p class="cap"><b>Table 1.</b> <code>evaluate_agent.py</code> on the test seeds 0–99 (full randomisation range; max. return 750). Each agent is its
+<code>best.pt</code>, chosen on seeds 500–519. "Paired" compares the same seed: same start, c<sub>rr</sub> and pulse schedule.</p>
+
+<h2>2. Existing Codes / Libraries</h2>
+<p><b>What we used.</b> PyTorch 1.13.1 remains the only ML dependency: <code>optim.Adam</code>, <code>nn.utils.clip_grad_norm_</code>, autograd,
+<code>torch.save</code>. gym 0.26.2 provides only the environment API; numpy runs the replay buffer and the episode bookkeeping;
+matplotlib draws Fig. 1. <b>What we wrote.</b> Both training loops, GAE, the replay buffer, the target update, entropy tuning, the
+curriculum, the vectorised environment and the evaluation are ours. As in stage 2 we did not use stable-baselines3 or RLlib:
+they would hide exactly what this stage is about, current stable-baselines3 requires <code>gymnasium</code>, and its PPO gives actor
+and critic the same input, so the asymmetric critic would need a custom policy class anyway. <b>What we borrowed.</b> Hyper-parameters, not code: the PPO values are close to the MuJoCo settings of Schulman et al. (2017) and the stable-baselines3 defaults; the SAC values and the target entropy
+−dim(A) follow Haarnoja et al. (2018b). <b>What we had to do to make it work.</b> <code>torch.set_num_threads(1)</code> (fastest for 22k-parameter
+networks and bit-reproducible: two runs with one seed give identical weights, which a test checks); every checkpoint stores its
+own configuration so that <code>evaluate_agent.py</code> and <code>demo.py</code> can rebuild any run; the code stays Python 3.7-compatible.</p>
+
+<h2>3. Reflections and Lessons Learned</h2>
+<h3>3.1 Changes from the proposal and from stage 2</h3>
+<ul>
+<li><b>The curriculum became concrete.</b> The proposal said "progressively"; we had to choose stages and fractions (§1.1). The first
+stage turned out to be sufficient for a surprisingly good policy: PPO evaluated on the <i>full</i> task after 51k steps of only fixed-
+friction, pulse-free training already scores 674 with 100 % survival on 20 evaluation seeds: it generalises to frictions and pushes it has not seen yet.</li>
+<li><b>SAC's actor now uses min(Q1, Q2)</b> instead of stage 2's Q1, and α is learned instead of fixed at 0.2 (stage 2 deferred both).
+In the reference run α fell from 0.2 to below 0.003 within 30k steps while the policy entropy settled at the target −2.</li>
+<li><b>No PPO entropy bonus</b> (stage 2 default: 0.01). With a state-independent log σ, exploration is set by σ itself, which PPO
+lowers as the policy improves (0.61 → 0.10 over the run); we have not yet tested whether a bonus helps.</li>
+<li><b>Reward scaling</b> (×0.1, learning only) was not in the proposal. It keeps value targets near 10 instead of 150, so the value
+loss stays on the scale of the clipped policy loss it is added to; we chose it by reasoning, not by an ablation.</li>
+</ul>
+<h3>3.2 Lessons</h3>
+<ul>
+<li><b>Mean return hides the tail.</b> On the test seeds PPO beats LQR on 77/100 seeds (+2.4 on the other 99), yet its mean is lower,
+because it drops the ball once: seed 0 starts near a corner with a 1.41 m s<sup>−2</sup> push from t = 0.03 s, a rare combination.
+LQR saves it. The proposal's success-rate metric is the right primary metric; the final version needs targeted hard-start tests.</li>
+<li><b>Train in the conditions you deploy in.</b> Under noise, lag and delay, the PPO policy trained on the ideal task collapses
+(386.7, 78 % survival), plausibly because the precise, high-gain behaviour it learned is what lag destabilises. The same run with
+the realism parameters in its last stage reaches 657.3 (99 %): 29.9 above LQR, which degrades for the same reason, and level with
+PD. Its learning curve shows the effect directly: while it trained on the ideal early stages, its realistic evaluation score fell from
+643 to 251, and it recovered only once the realistic stage began.</li>
+<li><b>Sample efficiency ≠ speed.</b> SAC scored 681 after 20k steps, where PPO had 674 after 51k, but each SAC step costs a gradient update:
+its 200k steps took 22 min, PPO's 1M took 6.6. SAC then levelled off at 680–690, below PD. We do not know why yet; candidates
+are the target entropy, the reward scale, and simply too few steps.</li>
+
+</ul>
+<h3>3.3 Remaining changes towards the final version</h3>
+<p>Several training seeds per configuration with confidence intervals; the proposal's two remaining baselines (LQR at nominal
+friction, and the grid-searched fixed gain); held-out conditions including 3 m s<sup>−2</sup> pulses; the asymmetric critic and
+<code>--curriculum full</code> as ablations (the asymmetric critic reached each level slightly earlier in our single run, 726 vs 721 at
+252k steps, and ended equal: one seed cannot answer stage 2's open question); hard-start episodes to close the tail failure; and a
+diagnosis of SAC's plateau.</p>
+
+<h2>4. How to Run</h2>
+<div class="run">python train.py --algo ppo --quick                     # ~15 s, every code path (also --algo sac)
+python train.py --algo ppo|sac [--realistic] [--asymmetric]   # PPO 1M steps ~7 min, SAC 200k steps ~22 min
+python evaluate_agent.py trained/*.pt [--realistic]            # the four reference agents vs PD, LQR (Table 1)
+python demo.py --checkpoint trained/ppo_staged_seed0.pt --policy lqr+agent    # 3D view</div>
+<p>All 65 tests (14 environment, 7 renderer, 8 realism, 19 network, 17 agent) pass; <code>README.md</code> documents every option.</p>
+
+</body>
+</html>

@@ -3,3 +3,4 @@ __pycache__/
 .vscode/
 research/
 results_quick/
+runs/

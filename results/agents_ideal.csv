@@ -1,0 +1,501 @@
+policy,seed,return,realistic
+PD,0,695.8396,0
+PD,1,711.5993,0
+PD,2,707.2777,0
+PD,3,729.7889,0
+PD,4,670.8097,0
+PD,5,713.3398,0
+PD,6,705.0994,0
+PD,7,709.6251,0
+PD,8,732.9768,0
+PD,9,707.7133,0
+PD,10,706.4862,0
+PD,11,721.8184,0
+PD,12,705.0765,0
+PD,13,714.1758,0
+PD,14,704.8853,0
+PD,15,717.6219,0
+PD,16,711.1273,0
+PD,17,725.8101,0
+PD,18,730.7804,0
+PD,19,716.2633,0
+PD,20,718.5478,0
+PD,21,714.6129,0
+PD,22,720.8988,0
+PD,23,726.1381,0
+PD,24,676.2684,0
+PD,25,713.5186,0
+PD,26,726.8322,0
+PD,27,714.1086,0
+PD,28,709.4645,0
+PD,29,731.2018,0
+PD,30,726.5344,0
+PD,31,704.1612,0
+PD,32,700.1535,0
+PD,33,700.8411,0
+PD,34,725.7139,0
+PD,35,682.6094,0
+PD,36,713.8415,0
+PD,37,717.1710,0
+PD,38,698.7480,0
+PD,39,721.1287,0
+PD,40,708.2949,0
+PD,41,707.8772,0
+PD,42,712.9495,0
+PD,43,708.5623,0
+PD,44,701.1016,0
+PD,45,696.2090,0
+PD,46,716.5229,0
+PD,47,715.9588,0
+PD,48,711.1993,0
+PD,49,687.2881,0
+PD,50,700.9285,0
+PD,51,706.4420,0
+PD,52,716.2392,0
+PD,53,697.5530,0
+PD,54,726.6214,0
+PD,55,709.0520,0
+PD,56,697.8986,0
+PD,57,719.6752,0
+PD,58,727.2970,0
+PD,59,717.0767,0
+PD,60,707.6804,0
+PD,61,707.5433,0
+PD,62,699.2564,0
+PD,63,724.4350,0
+PD,64,706.2630,0
+PD,65,720.9538,0
+PD,66,715.5894,0
+PD,67,716.4942,0
+PD,68,703.4400,0
+PD,69,708.7224,0
+PD,70,717.8949,0
+PD,71,724.8519,0
+PD,72,713.4009,0
+PD,73,702.3661,0
+PD,74,710.1790,0
+PD,75,702.6180,0
+PD,76,710.9661,0
+PD,77,715.4041,0
+PD,78,728.3978,0
+PD,79,705.3908,0
+PD,80,721.3909,0
+PD,81,710.2303,0
+PD,82,722.8556,0
+PD,83,729.1774,0
+PD,84,721.4728,0
+PD,85,721.8496,0
+PD,86,714.1339,0
+PD,87,737.3015,0
+PD,88,708.4023,0
+PD,89,715.6657,0
+PD,90,721.2234,0
+PD,91,703.0674,0
+PD,92,726.1988,0
+PD,93,691.8009,0
+PD,94,722.9005,0
+PD,95,720.1428,0
+PD,96,713.8728,0
+PD,97,712.1737,0
+PD,98,723.4685,0
+PD,99,715.5095,0
+LQR,0,684.5500,0
+LQR,1,730.5807,0
+LQR,2,724.8859,0
+LQR,3,733.9894,0
+LQR,4,715.2029,0
+LQR,5,723.4538,0
+LQR,6,720.2243,0
+LQR,7,719.7378,0
+LQR,8,738.1826,0
+LQR,9,717.4987,0
+LQR,10,722.1647,0
+LQR,11,727.7187,0
+LQR,12,725.6560,0
+LQR,13,727.2196,0
+LQR,14,724.4594,0
+LQR,15,727.0848,0
+LQR,16,709.2592,0
+LQR,17,732.9322,0
+LQR,18,737.1493,0
+LQR,19,725.0154,0
+LQR,20,723.6729,0
+LQR,21,727.4820,0
+LQR,22,726.1547,0
+LQR,23,733.5029,0
+LQR,24,713.9346,0
+LQR,25,728.4989,0
+LQR,26,734.4973,0
+LQR,27,720.4140,0
+LQR,28,719.1112,0
+LQR,29,735.2828,0
+LQR,30,732.6098,0
+LQR,31,719.4988,0
+LQR,32,709.5293,0
+LQR,33,714.5817,0
+LQR,34,729.8694,0
+LQR,35,705.6156,0
+LQR,36,724.1630,0
+LQR,37,725.8191,0
+LQR,38,727.2483,0
+LQR,39,728.7805,0
+LQR,40,732.1467,0
+LQR,41,720.3146,0
+LQR,42,724.4518,0
+LQR,43,719.9173,0
+LQR,44,700.5389,0
+LQR,45,718.6497,0
+LQR,46,725.3990,0
+LQR,47,725.5641,0
+LQR,48,721.5693,0
+LQR,49,718.1335,0
+LQR,50,716.5576,0
+LQR,51,718.1322,0
+LQR,52,721.6759,0
+LQR,53,707.5774,0
+LQR,54,731.1051,0
+LQR,55,717.0368,0
+LQR,56,718.3619,0
+LQR,57,731.7773,0
+LQR,58,733.7376,0
+LQR,59,724.2867,0
+LQR,60,717.2307,0
+LQR,61,719.8896,0
+LQR,62,718.1261,0
+LQR,63,731.6975,0
+LQR,64,723.7298,0
+LQR,65,727.0322,0
+LQR,66,730.9375,0
+LQR,67,722.6587,0
+LQR,68,725.5260,0
+LQR,69,729.6316,0
+LQR,70,723.1984,0
+LQR,71,732.9958,0
+LQR,72,723.9758,0
+LQR,73,727.1144,0
+LQR,74,722.5661,0
+LQR,75,723.3725,0
+LQR,76,720.1900,0
+LQR,77,728.3202,0
+LQR,78,736.1628,0
+LQR,79,715.3883,0
+LQR,80,732.0545,0
+LQR,81,721.8730,0
+LQR,82,732.0757,0
+LQR,83,738.7235,0
+LQR,84,732.0422,0
+LQR,85,725.9808,0
+LQR,86,720.6517,0
+LQR,87,741.1748,0
+LQR,88,726.9831,0
+LQR,89,733.1464,0
+LQR,90,728.3096,0
+LQR,91,725.8215,0
+LQR,92,732.5105,0
+LQR,93,718.9577,0
+LQR,94,734.3832,0
+LQR,95,728.3093,0
+LQR,96,722.2918,0
+LQR,97,718.5943,0
+LQR,98,730.0971,0
+LQR,99,723.0538,0
+PPO ppo_staged_seed0,0,9.3800,0
+PPO ppo_staged_seed0,1,722.3158,0
+PPO ppo_staged_seed0,2,721.4084,0
+PPO ppo_staged_seed0,3,733.2692,0
+PPO ppo_staged_seed0,4,716.8775,0
+PPO ppo_staged_seed0,5,726.0451,0
+PPO ppo_staged_seed0,6,723.0623,0
+PPO ppo_staged_seed0,7,723.2489,0
+PPO ppo_staged_seed0,8,741.5877,0
+PPO ppo_staged_seed0,9,722.0778,0
+PPO ppo_staged_seed0,10,725.8709,0
+PPO ppo_staged_seed0,11,729.1856,0
+PPO ppo_staged_seed0,12,725.6501,0
+PPO ppo_staged_seed0,13,725.8827,0
+PPO ppo_staged_seed0,14,731.5686,0
+PPO ppo_staged_seed0,15,731.7480,0
+PPO ppo_staged_seed0,16,723.1484,0
+PPO ppo_staged_seed0,17,737.0224,0
+PPO ppo_staged_seed0,18,739.4704,0
+PPO ppo_staged_seed0,19,728.7274,0
+PPO ppo_staged_seed0,20,725.7354,0
+PPO ppo_staged_seed0,21,729.7428,0
+PPO ppo_staged_seed0,22,728.8406,0
+PPO ppo_staged_seed0,23,738.2385,0
+PPO ppo_staged_seed0,24,712.9844,0
+PPO ppo_staged_seed0,25,731.1658,0
+PPO ppo_staged_seed0,26,738.7715,0
+PPO ppo_staged_seed0,27,726.2786,0
+PPO ppo_staged_seed0,28,721.7535,0
+PPO ppo_staged_seed0,29,735.1193,0
+PPO ppo_staged_seed0,30,734.2071,0
+PPO ppo_staged_seed0,31,722.2404,0
+PPO ppo_staged_seed0,32,720.1895,0
+PPO ppo_staged_seed0,33,721.6466,0
+PPO ppo_staged_seed0,34,728.5246,0
+PPO ppo_staged_seed0,35,701.8434,0
+PPO ppo_staged_seed0,36,722.8941,0
+PPO ppo_staged_seed0,37,729.3572,0
+PPO ppo_staged_seed0,38,730.6631,0
+PPO ppo_staged_seed0,39,732.3763,0
+PPO ppo_staged_seed0,40,734.4769,0
+PPO ppo_staged_seed0,41,721.4811,0
+PPO ppo_staged_seed0,42,725.5655,0
+PPO ppo_staged_seed0,43,723.1322,0
+PPO ppo_staged_seed0,44,702.5832,0
+PPO ppo_staged_seed0,45,724.7465,0
+PPO ppo_staged_seed0,46,732.9670,0
+PPO ppo_staged_seed0,47,729.1339,0
+PPO ppo_staged_seed0,48,721.2094,0
+PPO ppo_staged_seed0,49,720.3915,0
+PPO ppo_staged_seed0,50,715.6862,0
+PPO ppo_staged_seed0,51,720.8035,0
+PPO ppo_staged_seed0,52,726.1776,0
+PPO ppo_staged_seed0,53,720.7152,0
+PPO ppo_staged_seed0,54,731.6081,0
+PPO ppo_staged_seed0,55,721.7888,0
+PPO ppo_staged_seed0,56,721.4733,0
+PPO ppo_staged_seed0,57,737.3726,0
+PPO ppo_staged_seed0,58,735.6970,0
+PPO ppo_staged_seed0,59,727.4181,0
+PPO ppo_staged_seed0,60,717.0291,0
+PPO ppo_staged_seed0,61,725.7892,0
+PPO ppo_staged_seed0,62,721.0445,0
+PPO ppo_staged_seed0,63,735.2164,0
+PPO ppo_staged_seed0,64,723.3581,0
+PPO ppo_staged_seed0,65,727.5176,0
+PPO ppo_staged_seed0,66,728.3981,0
+PPO ppo_staged_seed0,67,719.4207,0
+PPO ppo_staged_seed0,68,730.2663,0
+PPO ppo_staged_seed0,69,730.5949,0
+PPO ppo_staged_seed0,70,719.7022,0
+PPO ppo_staged_seed0,71,735.8800,0
+PPO ppo_staged_seed0,72,725.9136,0
+PPO ppo_staged_seed0,73,730.5368,0
+PPO ppo_staged_seed0,74,723.5633,0
+PPO ppo_staged_seed0,75,724.8181,0
+PPO ppo_staged_seed0,76,724.9735,0
+PPO ppo_staged_seed0,77,731.6315,0
+PPO ppo_staged_seed0,78,738.4198,0
+PPO ppo_staged_seed0,79,708.3559,0
+PPO ppo_staged_seed0,80,734.1965,0
+PPO ppo_staged_seed0,81,729.6265,0
+PPO ppo_staged_seed0,82,736.6051,0
+PPO ppo_staged_seed0,83,738.5331,0
+PPO ppo_staged_seed0,84,732.3847,0
+PPO ppo_staged_seed0,85,721.5343,0
+PPO ppo_staged_seed0,86,719.9071,0
+PPO ppo_staged_seed0,87,744.9999,0
+PPO ppo_staged_seed0,88,729.3150,0
+PPO ppo_staged_seed0,89,732.7772,0
+PPO ppo_staged_seed0,90,728.5471,0
+PPO ppo_staged_seed0,91,729.1878,0
+PPO ppo_staged_seed0,92,735.9430,0
+PPO ppo_staged_seed0,93,724.1889,0
+PPO ppo_staged_seed0,94,736.1475,0
+PPO ppo_staged_seed0,95,731.0096,0
+PPO ppo_staged_seed0,96,725.2103,0
+PPO ppo_staged_seed0,97,721.0971,0
+PPO ppo_staged_seed0,98,735.5088,0
+PPO ppo_staged_seed0,99,726.7754,0
+PPO ppo_asym_staged_seed0,0,10.2604,0
+PPO ppo_asym_staged_seed0,1,733.7233,0
+PPO ppo_asym_staged_seed0,2,725.9017,0
+PPO ppo_asym_staged_seed0,3,732.1895,0
+PPO ppo_asym_staged_seed0,4,721.3239,0
+PPO ppo_asym_staged_seed0,5,726.5112,0
+PPO ppo_asym_staged_seed0,6,724.7352,0
+PPO ppo_asym_staged_seed0,7,725.1819,0
+PPO ppo_asym_staged_seed0,8,739.5298,0
+PPO ppo_asym_staged_seed0,9,724.2562,0
+PPO ppo_asym_staged_seed0,10,728.8584,0
+PPO ppo_asym_staged_seed0,11,728.9072,0
+PPO ppo_asym_staged_seed0,12,728.1456,0
+PPO ppo_asym_staged_seed0,13,727.4725,0
+PPO ppo_asym_staged_seed0,14,729.1855,0
+PPO ppo_asym_staged_seed0,15,733.4412,0
+PPO ppo_asym_staged_seed0,16,711.3147,0
+PPO ppo_asym_staged_seed0,17,738.6453,0
+PPO ppo_asym_staged_seed0,18,740.5152,0
+PPO ppo_asym_staged_seed0,19,729.4563,0
+PPO ppo_asym_staged_seed0,20,723.0913,0
+PPO ppo_asym_staged_seed0,21,731.6058,0
+PPO ppo_asym_staged_seed0,22,729.2743,0
+PPO ppo_asym_staged_seed0,23,739.9006,0
+PPO ppo_asym_staged_seed0,24,710.7244,0
+PPO ppo_asym_staged_seed0,25,727.7728,0
+PPO ppo_asym_staged_seed0,26,737.9624,0
+PPO ppo_asym_staged_seed0,27,726.8858,0
+PPO ppo_asym_staged_seed0,28,725.0272,0
+PPO ppo_asym_staged_seed0,29,729.6386,0
+PPO ppo_asym_staged_seed0,30,734.5543,0
+PPO ppo_asym_staged_seed0,31,701.2783,0
+PPO ppo_asym_staged_seed0,32,727.7716,0
+PPO ppo_asym_staged_seed0,33,724.7966,0
+PPO ppo_asym_staged_seed0,34,721.7090,0
+PPO ppo_asym_staged_seed0,35,710.2961,0
+PPO ppo_asym_staged_seed0,36,734.8116,0
+PPO ppo_asym_staged_seed0,37,729.0556,0
+PPO ppo_asym_staged_seed0,38,729.0762,0
+PPO ppo_asym_staged_seed0,39,732.3544,0
+PPO ppo_asym_staged_seed0,40,736.0450,0
+PPO ppo_asym_staged_seed0,41,720.3404,0
+PPO ppo_asym_staged_seed0,42,726.5407,0
+PPO ppo_asym_staged_seed0,43,724.7267,0
+PPO ppo_asym_staged_seed0,44,702.0640,0
+PPO ppo_asym_staged_seed0,45,723.3808,0
+PPO ppo_asym_staged_seed0,46,729.2402,0
+PPO ppo_asym_staged_seed0,47,731.9323,0
+PPO ppo_asym_staged_seed0,48,724.2605,0
+PPO ppo_asym_staged_seed0,49,723.1531,0
+PPO ppo_asym_staged_seed0,50,721.7317,0
+PPO ppo_asym_staged_seed0,51,722.4281,0
+PPO ppo_asym_staged_seed0,52,726.5863,0
+PPO ppo_asym_staged_seed0,53,716.2726,0
+PPO ppo_asym_staged_seed0,54,731.8369,0
+PPO ppo_asym_staged_seed0,55,724.2427,0
+PPO ppo_asym_staged_seed0,56,722.9888,0
+PPO ppo_asym_staged_seed0,57,735.0051,0
+PPO ppo_asym_staged_seed0,58,737.1853,0
+PPO ppo_asym_staged_seed0,59,727.7489,0
+PPO ppo_asym_staged_seed0,60,717.4428,0
+PPO ppo_asym_staged_seed0,61,721.5844,0
+PPO ppo_asym_staged_seed0,62,722.0671,0
+PPO ppo_asym_staged_seed0,63,736.4884,0
+PPO ppo_asym_staged_seed0,64,721.7557,0
+PPO ppo_asym_staged_seed0,65,721.6929,0
+PPO ppo_asym_staged_seed0,66,728.8332,0
+PPO ppo_asym_staged_seed0,67,725.8523,0
+PPO ppo_asym_staged_seed0,68,729.6782,0
+PPO ppo_asym_staged_seed0,69,729.9031,0
+PPO ppo_asym_staged_seed0,70,726.0470,0
+PPO ppo_asym_staged_seed0,71,735.3259,0
+PPO ppo_asym_staged_seed0,72,731.0230,0
+PPO ppo_asym_staged_seed0,73,733.0631,0
+PPO ppo_asym_staged_seed0,74,722.1954,0
+PPO ppo_asym_staged_seed0,75,718.8252,0
+PPO ppo_asym_staged_seed0,76,724.4713,0
+PPO ppo_asym_staged_seed0,77,733.6304,0
+PPO ppo_asym_staged_seed0,78,738.2971,0
+PPO ppo_asym_staged_seed0,79,714.6642,0
+PPO ppo_asym_staged_seed0,80,731.3082,0
+PPO ppo_asym_staged_seed0,81,728.6905,0
+PPO ppo_asym_staged_seed0,82,737.2351,0
+PPO ppo_asym_staged_seed0,83,743.3655,0
+PPO ppo_asym_staged_seed0,84,734.4656,0
+PPO ppo_asym_staged_seed0,85,719.7140,0
+PPO ppo_asym_staged_seed0,86,726.3705,0
+PPO ppo_asym_staged_seed0,87,746.7873,0
+PPO ppo_asym_staged_seed0,88,727.9513,0
+PPO ppo_asym_staged_seed0,89,732.3233,0
+PPO ppo_asym_staged_seed0,90,730.2590,0
+PPO ppo_asym_staged_seed0,91,728.4856,0
+PPO ppo_asym_staged_seed0,92,738.9657,0
+PPO ppo_asym_staged_seed0,93,726.2347,0
+PPO ppo_asym_staged_seed0,94,736.8129,0
+PPO ppo_asym_staged_seed0,95,731.9699,0
+PPO ppo_asym_staged_seed0,96,727.2413,0
+PPO ppo_asym_staged_seed0,97,723.3223,0
+PPO ppo_asym_staged_seed0,98,738.6049,0
+PPO ppo_asym_staged_seed0,99,726.9458,0
+SAC sac_staged_seed0,0,684.7035,0
+SAC sac_staged_seed0,1,683.3674,0
+SAC sac_staged_seed0,2,679.2626,0
+SAC sac_staged_seed0,3,711.6738,0
+SAC sac_staged_seed0,4,580.0812,0
+SAC sac_staged_seed0,5,685.1740,0
+SAC sac_staged_seed0,6,666.5888,0
+SAC sac_staged_seed0,7,695.4698,0
+SAC sac_staged_seed0,8,712.3661,0
+SAC sac_staged_seed0,9,681.7111,0
+SAC sac_staged_seed0,10,689.4729,0
+SAC sac_staged_seed0,11,695.8599,0
+SAC sac_staged_seed0,12,681.1750,0
+SAC sac_staged_seed0,13,689.1072,0
+SAC sac_staged_seed0,14,684.8864,0
+SAC sac_staged_seed0,15,698.1726,0
+SAC sac_staged_seed0,16,673.6617,0
+SAC sac_staged_seed0,17,720.2545,0
+SAC sac_staged_seed0,18,721.6889,0
+SAC sac_staged_seed0,19,694.3183,0
+SAC sac_staged_seed0,20,699.4365,0
+SAC sac_staged_seed0,21,690.5643,0
+SAC sac_staged_seed0,22,700.6372,0
+SAC sac_staged_seed0,23,720.8453,0
+SAC sac_staged_seed0,24,636.5760,0
+SAC sac_staged_seed0,25,691.7032,0
+SAC sac_staged_seed0,26,721.7979,0
+SAC sac_staged_seed0,27,688.9558,0
+SAC sac_staged_seed0,28,705.6635,0
+SAC sac_staged_seed0,29,702.0960,0
+SAC sac_staged_seed0,30,714.1412,0
+SAC sac_staged_seed0,31,655.1053,0
+SAC sac_staged_seed0,32,677.7269,0
+SAC sac_staged_seed0,33,671.5984,0
+SAC sac_staged_seed0,34,706.9875,0
+SAC sac_staged_seed0,35,660.9184,0
+SAC sac_staged_seed0,36,696.4735,0
+SAC sac_staged_seed0,37,710.5433,0
+SAC sac_staged_seed0,38,686.0155,0
+SAC sac_staged_seed0,39,703.0481,0
+SAC sac_staged_seed0,40,702.1388,0
+SAC sac_staged_seed0,41,692.4486,0
+SAC sac_staged_seed0,42,691.9421,0
+SAC sac_staged_seed0,43,696.5496,0
+SAC sac_staged_seed0,44,666.9792,0
+SAC sac_staged_seed0,45,646.3870,0
+SAC sac_staged_seed0,46,715.8747,0
+SAC sac_staged_seed0,47,709.1487,0
+SAC sac_staged_seed0,48,669.0863,0
+SAC sac_staged_seed0,49,685.6862,0
+SAC sac_staged_seed0,50,668.3508,0
+SAC sac_staged_seed0,51,668.9812,0
+SAC sac_staged_seed0,52,695.4269,0
+SAC sac_staged_seed0,53,669.6035,0
+SAC sac_staged_seed0,54,711.3213,0
+SAC sac_staged_seed0,55,689.6961,0
+SAC sac_staged_seed0,56,669.4934,0
+SAC sac_staged_seed0,57,710.6430,0
+SAC sac_staged_seed0,58,717.6702,0
+SAC sac_staged_seed0,59,698.5323,0
+SAC sac_staged_seed0,60,686.8878,0
+SAC sac_staged_seed0,61,684.0404,0
+SAC sac_staged_seed0,62,674.0834,0
+SAC sac_staged_seed0,63,717.5549,0
+SAC sac_staged_seed0,64,701.7290,0
+SAC sac_staged_seed0,65,693.4266,0
+SAC sac_staged_seed0,66,720.1145,0
+SAC sac_staged_seed0,67,692.8273,0
+SAC sac_staged_seed0,68,706.3245,0
+SAC sac_staged_seed0,69,689.6602,0
+SAC sac_staged_seed0,70,695.1592,0
+SAC sac_staged_seed0,71,700.9021,0
+SAC sac_staged_seed0,72,685.9908,0
+SAC sac_staged_seed0,73,681.3534,0
+SAC sac_staged_seed0,74,691.1860,0
+SAC sac_staged_seed0,75,685.2700,0
+SAC sac_staged_seed0,76,689.3973,0
+SAC sac_staged_seed0,77,708.4311,0
+SAC sac_staged_seed0,78,714.6039,0
+SAC sac_staged_seed0,79,688.0863,0
+SAC sac_staged_seed0,80,718.6933,0
+SAC sac_staged_seed0,81,695.7978,0
+SAC sac_staged_seed0,82,709.2732,0
+SAC sac_staged_seed0,83,711.6914,0
+SAC sac_staged_seed0,84,700.1286,0
+SAC sac_staged_seed0,85,678.3990,0
+SAC sac_staged_seed0,86,682.2438,0
+SAC sac_staged_seed0,87,733.2721,0
+SAC sac_staged_seed0,88,668.8510,0
+SAC sac_staged_seed0,89,716.0840,0
+SAC sac_staged_seed0,90,699.5275,0
+SAC sac_staged_seed0,91,680.0498,0
+SAC sac_staged_seed0,92,710.3208,0
+SAC sac_staged_seed0,93,668.5211,0
+SAC sac_staged_seed0,94,689.0559,0
+SAC sac_staged_seed0,95,709.2921,0
+SAC sac_staged_seed0,96,674.8669,0
+SAC sac_staged_seed0,97,685.0113,0
+SAC sac_staged_seed0,98,718.4419,0
+SAC sac_staged_seed0,99,696.6674,0
