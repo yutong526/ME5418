@@ -104,11 +104,17 @@ def polyak_update(target, source, tau):
         t.mul_(1.0 - tau).add_(tau * s)
 
 
-def save_sac(path, actor, critic, target, log_alpha, config, step, evaluation=None):
-    """Save a SAC checkpoint (the actor is all a deployed policy needs)."""
+def save_sac(path, actor, critic, target, log_alpha, config, step, evaluation=None,
+             stage=None):
+    """Save a SAC checkpoint (the actor is all a deployed policy needs).
+
+    ``step`` is the number of environment steps so far and ``stage`` the
+    curriculum stage of the latest environment step.
+    """
     torch.save({"algo": "sac", "actor": actor.state_dict(), "critic": critic.state_dict(),
                 "target_critic": target.state_dict(), "log_alpha": float(log_alpha.item()),
-                "train_config": dict(config), "step": int(step), "eval": evaluation}, path)
+                "train_config": dict(config), "step": int(step), "stage": stage,
+                "eval": evaluation}, path)
 
 
 def load_sac_actor(checkpoint):
@@ -206,6 +212,7 @@ def train_sac(out_dir, verbose=True, **overrides):
     for iteration in range(n_iterations):
         step = iteration * n_envs
         _, stage_name, stage_kwargs = curriculum.stage_at(step)
+        in_final_stage = curriculum.is_final_stage(step)
         vec.set_env_kwargs(stage_kwargs)
 
         obs = vec.obs.copy()
@@ -243,17 +250,18 @@ def train_sac(out_dir, verbose=True, **overrides):
                             "eval_survival": res["survival"], "eval_goal": res["goal"]})
                 summary = {k: res[k] for k in ("mean", "std", "survival", "goal")}
                 save_sac(os.path.join(out_dir, "last.pt"), actor, critic, target, log_alpha,
-                         cfg, step, summary)
-                if res["mean"] > best_eval:
+                         cfg, step, summary, stage_name)
+                # best.pt is chosen only among checkpoints of the last stage.
+                if in_final_stage and res["mean"] > best_eval:
                     best_eval = res["mean"]
                     save_sac(os.path.join(out_dir, "best.pt"), actor, critic, target,
-                             log_alpha, cfg, step, summary)
+                             log_alpha, cfg, step, summary, stage_name)
                 if verbose:
                     print("[sac] step {:>8,}  {:<20} train {:7.1f}  eval {:7.1f} +- {:5.1f}  "
                           "survival {:4.0%}  alpha {:.3f}  {:5.0f} s".format(
                               step, stage_name, row.get("train_return", float("nan")),
                               res["mean"], res["std"], res["survival"],
-                              log_alpha.exp().item(), log.elapsed()))
+                              log_alpha.exp().item(), log.elapsed()), flush=True)
             log.write(row)
 
     vec.close()

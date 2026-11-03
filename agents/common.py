@@ -106,6 +106,23 @@ class Curriculum(object):
         """Environment arguments of the last stage (the task being trained for)."""
         return dict(self.stages[-1][2])
 
+    @property
+    def final_stage_start(self):
+        """First training step of the last stage."""
+        return self.stages[-1][0]
+
+    def is_final_stage(self, step):
+        """True if ``step`` lies in the last stage (the task being trained for).
+
+        The training loops only let a checkpoint become ``best.pt`` when the
+        data of its latest update came from this stage. Otherwise ``best.pt``
+        can be an early checkpoint that never trained under the conditions it
+        is evaluated in: evaluation always uses the last stage's conditions,
+        and with only ``EVAL_SEEDS`` (20 episodes) an early policy can score
+        a few points higher by chance.
+        """
+        return self.stage_at(step)[0] == len(self.stages) - 1
+
 
 class VecEnv(object):
     """N ``BallOnTrayEnv`` instances stepped together, with automatic reset.

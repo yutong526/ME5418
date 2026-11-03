@@ -5,7 +5,7 @@
 <title>ME5418 Learning Agent Report</title>
 <style>
   @page { size: A4; margin: 10mm 11mm 10mm 11mm; }
-  html { font-family: "Caladea", "Cambria", serif; font-size: 8.7pt; line-height: 1.26; color: #111; }
+  html { font-family: "Times New Roman", "Liberation Serif", Times, serif; font-size: 8.7pt; line-height: 1.26; color: #111; }
   body { margin: 0; }
   h1 { font-family: "Liberation Sans", Arial, sans-serif; font-size: 13.6pt; margin: 0; color: #111; }
   .sub { font-family: "Liberation Sans", Arial, sans-serif; font-size: 8.4pt; color: #444;
@@ -43,9 +43,10 @@
 <div class="abstract">This stage turns the stage 2 networks into learning agents: complete training loops for both algorithms of the
 proposal, <b>PPO</b> and <b>SAC</b>, the proposal's <b>staged domain randomisation</b>, and the tools to evaluate a trained agent
 against the PD and LQR baselines and watch it in the 3D view. Everything is written against <code>torch.nn</code>, with no RL
-framework, and runs on one CPU core. The code is complete and runnable; first reference runs already learn: PPO reaches the
-LQR level in about 7 minutes. On the 100 test seeds PPO beats LQR on 77 of them but drops one hard start; under noise, lag and delay, PPO trained in those
-conditions beats LQR by 30 points. SAC learns faster per sample but levels off below PD.</div>
+framework, and runs on one CPU core. The code is complete and runnable, and the reference runs (three training seeds each) learn:
+a 1M-step PPO run takes 6–7 minutes and ends level with LQR on the 100 test seeds (−3.7 on average);
+under noise, lag and delay, PPO trained in those conditions is also level with LQR and below PD. SAC learns faster per sample but
+levels off below PD.</div>
 
 <h2>1. Code Explanation</h2>
 <p>Stages 1–2 are unchanged apart from additions to <code>networks/losses.py</code> and a <code>--checkpoint</code> option in
@@ -59,7 +60,7 @@ conditions beats LQR by 30 points. SAC learns faster per sample but levels off b
 <tr><td><code>train.py</code></td><td>Command line: <code>--algo ppo|sac</code>, <code>--curriculum</code>, <code>--realistic</code>, <code>--asymmetric</code>, <code>--quick</code>; writes <code>runs/&lt;name&gt;/</code>.</td></tr>
 <tr><td><code>evaluate_agent.py</code></td><td>Agents next to PD and LQR on the test seeds 0–99, with paired differences; <code>--realistic</code>.</td></tr>
 <tr><td><code>plot_training.py</code></td><td>Learning curves with the PD and LQR levels (Fig. 1).</td></tr>
-<tr><td><code>tests/test_agents.py</code></td><td>17 tests: GAE by hand, <code>VecEnv</code>, curriculum, replay buffer, Polyak, α direction, smoke runs, reproducibility.</td></tr>
+<tr><td><code>tests/test_agents.py</code></td><td>20 tests: GAE by hand, <code>VecEnv</code>, curriculum, replay buffer, Polyak, α direction, smoke runs, reproducibility.</td></tr>
 </table>
 
 <h3>1.1 Pipeline and shared pieces</h3>
@@ -93,21 +94,23 @@ nothing; a hand-computed GAE test pins down both cases.</p>
 <h3>1.3 First results</h3>
 <div class="fig"><img src="../media/learning_curves.png">
 <p class="cap"><b>Fig. 1.</b> Evaluation return (deterministic policy, seeds 500–519, full range) of the reference runs, against environment
-steps and training time; dashed: LQR and PD on the same seeds. One training seed per agent, one CPU core each: PPO 1M steps in 6.6 min, SAC 200k steps in 22 min.</p></div>
+steps and training time; dashed: LQR and PD on the same seeds. Training seed 0 shown; twelve runs at once, one CPU core each: PPO 1M steps in 6.2–6.6 min, SAC 200k steps in 22.5 min.</p></div>
 <table>
-<tr><th>Condition</th><th>Policy (one training seed each)</th><th class="n">Return</th><th class="n">Survival</th><th class="n">Goal %</th><th class="n">vs LQR, paired</th></tr>
-<tr><td rowspan="5">Ideal</td><td>PD</td><td class="n">712.6 ± 11.7</td><td class="n">100 %</td><td class="n">93.4</td><td class="n">—</td></tr>
-<tr><td>LQR</td><td class="n">724.4 ± 8.3</td><td class="n">100 %</td><td class="n">96.1</td><td class="n">—</td></tr>
-<tr><td>PPO</td><td class="n">720.0 ± 71.8</td><td class="n">99 %</td><td class="n">95.1</td><td class="n">−4.4, better on 77/100</td></tr>
-<tr><td>PPO, asymmetric critic</td><td class="n">720.6 ± 71.8</td><td class="n">99 %</td><td class="n">95.3</td><td class="n">−3.8, better on 83/100</td></tr>
-<tr><td>SAC</td><td class="n">692.0 ± 21.0</td><td class="n">100 %</td><td class="n">89.8</td><td class="n">−32.4, better on 1/100</td></tr>
-<tr><td rowspan="4">Noise, lag 0.05 s, 1-step delay</td><td>PD</td><td class="n">658.5 ± 68.3</td><td class="n">99 %</td><td class="n">86.7</td><td class="n">—</td></tr>
-<tr><td>LQR</td><td class="n">627.4 ± 111.1</td><td class="n">97 %</td><td class="n">78.8</td><td class="n">—</td></tr>
-<tr><td>PPO trained on the ideal task</td><td class="n">386.7 ± 118.3</td><td class="n">78 %</td><td class="n">13.8</td><td class="n">−240.7, better on 2/100</td></tr>
-<tr><td>PPO trained with <code>--realistic</code></td><td class="n">657.3 ± 69.8</td><td class="n">99 %</td><td class="n">81.1</td><td class="n">+29.9, better on 77/100</td></tr>
+<tr><th>Condition</th><th>Policy</th><th class="n">Return, best.pt</th><th class="n">Survival</th><th class="n">Goal %</th><th class="n">vs LQR, paired; seeds better</th><th class="n">last.pt</th></tr>
+<tr><td rowspan="5">Ideal</td><td>PD</td><td class="n">712.6 ± 11.7</td><td class="n">100 %</td><td class="n">93.4</td><td class="n">—</td><td class="n"></td></tr>
+<tr><td>LQR</td><td class="n">724.4 ± 8.3</td><td class="n">100 %</td><td class="n">96.1</td><td class="n">—</td><td class="n"></td></tr>
+<tr><td>PPO</td><td class="n">720.8 (715.9–726.5)</td><td class="n">99–100 %</td><td class="n">95.0</td><td class="n">−3.7 (−8.5…+2.1); 57–80</td><td class="n">720.0</td></tr>
+<tr><td>PPO, asymmetric critic</td><td class="n">721.7 (719.1–725.4)</td><td class="n">99–100 %</td><td class="n">95.2</td><td class="n">−2.7 (−5.3…+1.0); 74–79</td><td class="n">721.0</td></tr>
+<tr><td>SAC</td><td class="n">685.3 (672.8–694.5)</td><td class="n">99–100 %</td><td class="n">88.1</td><td class="n">−39.1 (−51.6…−29.9); 0–1</td><td class="n">679.8</td></tr>
+<tr><td rowspan="4">Noise, lag 0.05 s, 1-step delay</td><td>PD</td><td class="n">658.5 ± 68.3</td><td class="n">99 %</td><td class="n">86.7</td><td class="n">—</td><td class="n"></td></tr>
+<tr><td>LQR</td><td class="n">627.4 ± 111.1</td><td class="n">97 %</td><td class="n">78.8</td><td class="n">—</td><td class="n"></td></tr>
+<tr><td>PPO trained on the ideal task</td><td class="n">358.4 (236.2–454.9)</td><td class="n">32–83 %</td><td class="n">17.6</td><td class="n">−269.0 (−391.2…−172.5); 0–1</td><td class="n"></td></tr>
+<tr><td>PPO trained with <code>--realistic</code></td><td class="n">625.3 (618.9–628.8)</td><td class="n">95–97 %</td><td class="n">78.2</td><td class="n">−2.1 (−8.6…+1.4); 34–47</td><td class="n">625.7</td></tr>
 </table>
-<p class="cap"><b>Table 1.</b> <code>evaluate_agent.py</code> on the test seeds 0–99 (full randomisation range; max. return 750). Each agent is its
-<code>best.pt</code>, chosen on seeds 500–519. "Paired" compares the same seed: same start, c<sub>rr</sub> and pulse schedule.</p>
+<p class="cap"><b>Table 1.</b> <code>evaluate_agent.py</code> on the test seeds 0–99 (full randomisation range; max. return 750). Agents: mean
+over training seeds 0–2 (range in brackets); <code>best.pt</code> is the best checkpoint of the last curriculum stage on seeds 500–519,
+<code>last.pt</code> the end of the run. "Paired" compares the same test seed (same start, c<sub>rr</sub>, pulses); "seeds better" counts the
+test seeds on which the agent beats LQR, range over training seeds.</p>
 
 <h2>2. Existing Codes / Libraries</h2>
 <p><b>What we used.</b> PyTorch 1.13.1 remains the only ML dependency: <code>optim.Adam</code>, <code>nn.utils.clip_grad_norm_</code>, autograd,
@@ -125,42 +128,41 @@ own configuration so that <code>evaluate_agent.py</code> and <code>demo.py</code
 <ul>
 <li><b>The curriculum became concrete.</b> The proposal said "progressively"; we had to choose stages and fractions (§1.1). The first
 stage turned out to be sufficient for a surprisingly good policy: PPO evaluated on the <i>full</i> task after 51k steps of only fixed-
-friction, pulse-free training already scores 674 with 100 % survival on 20 evaluation seeds: it generalises to frictions and pushes it has not seen yet.</li>
+friction, pulse-free training already scores 683–690 with 100 % survival on 20 evaluation seeds (three training seeds): it generalises to frictions and pushes it has not seen yet.</li>
 <li><b>SAC's actor now uses min(Q1, Q2)</b> instead of stage 2's Q1, and α is learned instead of fixed at 0.2 (stage 2 deferred both).
-In the reference run α fell from 0.2 to below 0.003 within 30k steps while the policy entropy settled at the target −2.</li>
+In all three runs α fell from 0.2 to below 0.003 within 28k–32k steps while the policy entropy settled at the target −2.</li>
 <li><b>No PPO entropy bonus</b> (stage 2 default: 0.01). With a state-independent log σ, exploration is set by σ itself, which PPO
-lowers as the policy improves (0.61 → 0.10 over the run); we have not yet tested whether a bonus helps.</li>
-<li><b>Reward scaling</b> (×0.1, learning only) was not in the proposal. It keeps value targets near 10 instead of 150, so the value
-loss stays on the scale of the clipped policy loss it is added to; we chose it by reasoning, not by an ablation.</li>
+lowers as the policy improves (0.61 → 0.10–0.11 over each run); we have not yet tested whether a bonus helps.</li>
+<li><b>Reward scaling</b> (×0.1, learning only, not in the proposal) keeps value targets near 10; chosen by reasoning, not by ablation.</li>
 </ul>
 <h3>3.2 Lessons</h3>
 <ul>
-<li><b>Mean return hides the tail.</b> On the test seeds PPO beats LQR on 77/100 seeds (+2.4 on the other 99), yet its mean is lower,
-because it drops the ball once: seed 0 starts near a corner with a 1.41 m s<sup>−2</sup> push from t = 0.03 s, a rare combination.
-LQR saves it. The proposal's success-rate metric is the right primary metric; the final version needs targeted hard-start tests.</li>
-<li><b>Train in the conditions you deploy in.</b> Under noise, lag and delay, the PPO policy trained on the ideal task collapses
-(386.7, 78 % survival), plausibly because the precise, high-gain behaviour it learned is what lag destabilises. The same run with
-the realism parameters in its last stage reaches 657.3 (99 %): 29.9 above LQR, which degrades for the same reason, and level with
-PD. Its learning curve shows the effect directly: while it trained on the ideal early stages, its realistic evaluation score fell from
-643 to 251, and it recovered only once the realistic stage began.</li>
-<li><b>Sample efficiency ≠ speed.</b> SAC scored 681 after 20k steps, where PPO had 674 after 51k, but each SAC step costs a gradient update:
-its 200k steps took 22 min, PPO's 1M took 6.6. SAC then levelled off at 680–690, below PD. We do not know why yet; candidates
+<li><b>Mean return hides the tail.</b> On the test seeds PPO beats LQR on 57–80 of 100 seeds depending on the training seed, yet its
+mean is level with or below LQR's, because four of the six PPO models drop the ball once: seed 0 starts near a corner with a
+1.41 m s<sup>−2</sup> push from t = 0.03 s. LQR saves it. Single-run win counts are unreliable: with the same configuration they ranged
+from 34 to 80. The proposal's success-rate metric is the right primary metric; the final version needs targeted hard-start tests.</li>
+<li><b>Training under noise, lag and delay does not yet beat the baselines.</b> PPO trained on the ideal task collapses under them
+(358.4, 32–83 % survival); trained to the end of the <code>--realistic</code> curriculum it is level with LQR (−8.6 to +1.4) and below PD in
+every run (29.7–39.6 lower, paired), while an early checkpoint trained only on the ideal fixed-friction task (step 51,200) is level
+with PD (657.3, paired −1.2; not yet explained). The proposal expected RL to be more robust than a PID-type controller (here PD)
+under realistic conditions; so far it only matches LQR and stays below PD, which does not meet that expectation.</li>
+<li><b>Sample efficiency ≠ speed.</b> SAC scored 680–693 after 20k steps in two of three runs (551 in the third), where PPO had 683–690
+after 51k, but each SAC step costs a gradient update: its 200k steps took 22.5 min, PPO's 1M took 6.2–6.6. SAC then levelled off
+below PD in all three runs (test return 672.8–694.5). We do not know why yet; candidates
 are the target entropy, the reward scale, and simply too few steps.</li>
 
 </ul>
 <h3>3.3 Remaining changes towards the final version</h3>
-<p>Several training seeds per configuration with confidence intervals; the proposal's two remaining baselines (LQR at nominal
-friction, and the grid-searched fixed gain); held-out conditions including 3 m s<sup>−2</sup> pulses; the asymmetric critic and
-<code>--curriculum full</code> as ablations (the asymmetric critic reached each level slightly earlier in our single run, 726 vs 721 at
-252k steps, and ended equal: one seed cannot answer stage 2's open question); hard-start episodes to close the tail failure; and a
-diagnosis of SAC's plateau.</p>
+<p>More training seeds per configuration with confidence intervals (three so far); the proposal's two remaining baselines (LQR at
+nominal friction, and the grid-searched fixed gain); held-out conditions including 3 m s<sup>−2</sup> pulses; the asymmetric critic and
+<code>--curriculum full</code> as ablations (with three seeds the two critics end level, 721.7 vs 720.8 on the test seeds, so stage 2's
+open question is still open); hard-start episodes to close the tail failure; a diagnosis of SAC's plateau; and a realistic-condition
+policy that beats PD.</p>
 
 <h2>4. How to Run</h2>
-<div class="run">python train.py --algo ppo --quick                     # ~15 s, every code path (also --algo sac)
-python train.py --algo ppo|sac [--realistic] [--asymmetric]   # PPO 1M steps ~7 min, SAC 200k steps ~22 min
-python evaluate_agent.py trained/*.pt [--realistic]            # the four reference agents vs PD, LQR (Table 1)
-python demo.py --checkpoint trained/ppo_staged_seed0.pt --policy lqr+agent    # 3D view</div>
-<p>All 65 tests (14 environment, 7 renderer, 8 realism, 19 network, 17 agent) pass; <code>README.md</code> documents every option.</p>
+<div class="run">python train.py --algo ppo|sac [--realistic] [--asymmetric] [--seed N]  # PPO 1M steps ~6–7 min, SAC 200k ~23 min
+python evaluate_agent.py trained/ppo_staged_seed0.pt [--realistic]  # a reference agent vs PD, LQR (Table 1)</div>
+<p>All 68 tests (14 environment, 7 renderer, 8 realism, 19 network, 20 agent) pass; <code>README.md</code> documents every option.</p>
 
 </body>
 </html>

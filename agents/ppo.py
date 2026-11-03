@@ -12,7 +12,9 @@ Builds on the stage 2 pieces: ``ActorCritic`` (networks/actor_critic.py) and
        advantages normalised per minibatch, gradient norm clipped, learning
        rate annealed linearly to zero over the run
     5. log one CSV row; every ``eval_interval`` steps evaluate the
-       deterministic policy on fixed held-out seeds and save checkpoints
+       deterministic policy on fixed held-out seeds and save checkpoints:
+       ``last.pt`` always, ``best.pt`` only for the best evaluation within the
+       last curriculum stage (see ``Curriculum.is_final_stage``)
 
 ``asymmetric=True`` trains the variant whose critic also receives c_rr and the
 base acceleration (``privileged_features``), from the same ``info`` dicts the
@@ -64,11 +66,15 @@ def _to_tensor(x):
     return torch.as_tensor(np.asarray(x), dtype=torch.float32)
 
 
-def save_ppo(path, network, config, step, evaluation=None):
-    """Save a PPO checkpoint: network configuration, weights and run metadata."""
+def save_ppo(path, network, config, step, evaluation=None, stage=None):
+    """Save a PPO checkpoint: network configuration, weights and run metadata.
+
+    ``step`` is the number of environment steps trained so far and ``stage``
+    the curriculum stage of the rollout of the latest update.
+    """
     torch.save({"algo": "ppo", "network_config": dict(network.config),
                 "state_dict": network.state_dict(), "train_config": dict(config),
-                "step": int(step), "eval": evaluation}, path)
+                "step": int(step), "stage": stage, "eval": evaluation}, path)
 
 
 def load_ppo(checkpoint):
@@ -117,6 +123,9 @@ def train_ppo(out_dir, verbose=True, **overrides):
     for iteration in range(n_iterations):
         step = iteration * batch_size
         _, stage_name, stage_kwargs = curriculum.stage_at(step)
+        # The rollout of this iteration starts at ``step``; it decides whether
+        # the updated network has trained under the final conditions.
+        in_final_stage = curriculum.is_final_stage(step)
         vec.set_env_kwargs(stage_kwargs)
         lr = cfg["learning_rate"] * (1.0 - iteration / float(n_iterations))
         for group in optimiser.param_groups:
@@ -209,16 +218,18 @@ def train_ppo(out_dir, verbose=True, **overrides):
             row.update({"eval_return": result["mean"], "eval_std": result["std"],
                         "eval_survival": result["survival"], "eval_goal": result["goal"]})
             summary = {k: result[k] for k in ("mean", "std", "survival", "goal")}
-            save_ppo(os.path.join(out_dir, "last.pt"), network, cfg, step, summary)
-            if result["mean"] > best_eval:
+            save_ppo(os.path.join(out_dir, "last.pt"), network, cfg, step, summary, stage_name)
+            # best.pt is chosen only among checkpoints of the last stage.
+            if in_final_stage and result["mean"] > best_eval:
                 best_eval = result["mean"]
-                save_ppo(os.path.join(out_dir, "best.pt"), network, cfg, step, summary)
+                save_ppo(os.path.join(out_dir, "best.pt"), network, cfg, step, summary,
+                         stage_name)
             if verbose:
                 print("[ppo] step {:>8,}  {:<20} train {:7.1f}  eval {:7.1f} +- {:5.1f}  "
                       "survival {:4.0%}  std {:.3f}  {:5.0f} s".format(
                           step, stage_name, row.get("train_return", float("nan")),
                           result["mean"], result["std"], result["survival"], row["std"],
-                          log.elapsed()))
+                          log.elapsed()), flush=True)
         log.write(row)
 
     vec.close()

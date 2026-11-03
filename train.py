@@ -5,7 +5,9 @@ Writes to ``runs/<name>/`` (``runs/`` is ignored by git):
     progress.csv   one row per PPO iteration / SAC log interval: training
                    returns, losses, and every ``--eval-interval`` steps the
                    return of the deterministic policy on seeds 500-519
-    best.pt        checkpoint with the best evaluation return so far
+    best.pt        checkpoint with the best evaluation return within the last
+                   curriculum stage (earlier stages never train under the
+                   evaluated conditions, so they are not eligible)
     last.pt        checkpoint at the last evaluation
 
 Examples:
@@ -94,7 +96,7 @@ def main():
     with open(os.path.join(out_dir, "config.json"), "w") as handle:
         json.dump(config, handle, indent=2, sort_keys=True)
     print("training {} for {:,} steps -> {}".format(args.algo.upper(), config["total_steps"],
-                                                     out_dir))
+                                                     out_dir), flush=True)
 
     start = time.perf_counter()
     if args.algo == "ppo":

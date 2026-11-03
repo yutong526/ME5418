@@ -6,7 +6,7 @@ checkpoint), so each seed gives the same start position, c_rr and
 disturbance schedule to every policy and the comparison is paired.
 
 Examples:
-    python evaluate_agent.py trained/*.pt                # the four reference agents
+    python evaluate_agent.py trained/*_seed0.pt          # the seed-0 reference agents (best.pt)
     python evaluate_agent.py runs/ppo_staged_seed0/best.pt
     python evaluate_agent.py runs/ppo_staged_seed0/best.pt runs/sac_staged_seed0/best.pt
     python evaluate_agent.py runs/ppo_staged_seed0/best.pt --realistic   # noise, lag, delay

@@ -145,6 +145,16 @@ def test_curriculum_realistic_only_in_last_stage():
     env.close()
 
 
+def test_curriculum_final_stage():
+    cur = Curriculum("staged", 1000)
+    start = cur.final_stage_start
+    assert start == cur.stages[-1][0] and start > 0
+    assert not cur.is_final_stage(0) and not cur.is_final_stage(start - 1)
+    assert cur.is_final_stage(start) and cur.is_final_stage(999)
+    single = Curriculum("full", 1000)
+    assert single.final_stage_start == 0 and single.is_final_stage(0)
+
+
 # --------------------------------------------------------- SAC pieces
 def test_replay_buffer_wraps_and_samples():
     buf = ReplayBuffer(5, seed=0)
@@ -273,6 +283,71 @@ def test_sac_smoke_run_learns_alpha_and_saves():
         shutil.rmtree(out)
 
 
+def _falling_scores(module):
+    """Replace ``module.evaluate_policy`` by a stub whose score falls with every call.
+
+    The earliest evaluation is then always the highest, the situation in which
+    an unrestricted "best so far" rule would keep an early checkpoint.
+    Returns a function that restores the original.
+    """
+    original = module.evaluate_policy
+    calls = []
+
+    def stub(policy, seeds, env_kwargs=None):
+        calls.append(1)
+        mean = 1000.0 - 10.0 * len(calls)
+        return {"returns": np.full(len(seeds), mean), "mean": mean, "std": 0.0,
+                "survival": 1.0, "goal": 0.0}
+
+    module.evaluate_policy = stub
+    return lambda: setattr(module, "evaluate_policy", original)
+
+
+def test_ppo_best_checkpoint_is_from_the_final_stage():
+    """best.pt is the best evaluation within the last stage, even if an earlier one scored higher."""
+    import agents.ppo as ppo_module
+    out = tempfile.mkdtemp()
+    restore = _falling_scores(ppo_module)
+    try:
+        # batch 256; evaluations after the rollouts starting at 0, 256, 512 and 768
+        train_ppo(out, verbose=False, total_steps=1024, num_envs=2, rollout_steps=128,
+                  epochs=1, eval_interval=256, seed=0)
+        cur = Curriculum("staged", 1024)
+        best = torch.load(os.path.join(out, "best.pt"), map_location="cpu")
+        last = torch.load(os.path.join(out, "last.pt"), map_location="cpu")
+        rows = [r for r in _rows(os.path.join(out, "progress.csv")) if r["eval_return"]]
+        assert len(rows) == 4 and rows[0]["stage"] != cur.stages[-1][1]
+        # The rollout behind best.pt began in the last stage ...
+        assert cur.is_final_stage(best["step"] - 256)
+        assert best["stage"] == cur.stages[-1][1] == "full"
+        # ... and it is the first evaluation there (scores fall with every call),
+        # not the overall highest one at step 256.
+        first_final = min(int(r["step"]) for r in rows if r["stage"] == "full")
+        assert best["step"] == first_final and best["eval"]["mean"] < float(rows[0]["eval_return"])
+        assert last["step"] == 1024 and last["stage"] == "full"
+    finally:
+        restore()
+        shutil.rmtree(out)
+
+
+def test_sac_best_checkpoint_is_from_the_final_stage():
+    """The same rule for SAC."""
+    import agents.sac as sac_module
+    out = tempfile.mkdtemp()
+    restore = _falling_scores(sac_module)
+    try:
+        train_sac(out, verbose=False, total_steps=600, warmup_steps=300, batch_size=64,
+                  eval_interval=100, log_interval=100, seed=0)
+        cur = Curriculum("staged", 600)
+        best = torch.load(os.path.join(out, "best.pt"), map_location="cpu")
+        assert cur.is_final_stage(best["step"] - 1) and best["stage"] == "full"
+        assert best["step"] == min(s for s in range(100, 601, 100) if cur.is_final_stage(s - 1))
+        assert torch.load(os.path.join(out, "last.pt"), map_location="cpu")["stage"] == "full"
+    finally:
+        restore()
+        shutil.rmtree(out)
+
+
 def test_evaluate_policy_matches_manual_rollout():
     """evaluate_policy returns exactly the return of a hand-run episode."""
     policy = lambda obs: np.array([0.1, -0.1], np.float32)      # noqa: E731
@@ -297,6 +372,7 @@ if __name__ == "__main__":
         test_vecenv_switches_ranges_at_episode_boundaries,
         test_curriculum_stages_follow_the_proposal,
         test_curriculum_realistic_only_in_last_stage,
+        test_curriculum_final_stage,
         test_replay_buffer_wraps_and_samples,
         test_polyak_update,
         test_alpha_moves_towards_target_entropy,
@@ -305,6 +381,8 @@ if __name__ == "__main__":
         test_ppo_asymmetric_smoke_run,
         test_ppo_is_reproducible,
         test_sac_smoke_run_learns_alpha_and_saves,
+        test_ppo_best_checkpoint_is_from_the_final_stage,
+        test_sac_best_checkpoint_is_from_the_final_stage,
         test_evaluate_policy_matches_manual_rollout,
     ]
     torch.set_num_threads(1)
