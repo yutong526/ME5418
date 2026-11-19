@@ -3,7 +3,9 @@
 The unit tests check the pieces the training loops are built from against
 hand-written expectations: GAE with termination and truncation, the parallel
 environments (automatic reset, true last observation, seeds, curriculum
-switches), the replay buffer, the Polyak update and the entropy temperature.
+switches), the replay buffer, the Polyak update, the entropy temperature and
+the optional agent inputs of ``agents/features.py`` (past actions,
+disturbance estimate, input scale).
 The smoke tests run both training loops for a few thousand steps and check
 that they finish, write their outputs, save loadable checkpoints and are
 reproducible. They do not test that a good policy is learned.
@@ -25,8 +27,9 @@ import torch
 # Make the project root importable, wherever this file is run from.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents import (CURRICULA, Curriculum, ReplayBuffer, VecEnv, load_policy,  # noqa: E402
-                    polyak_update, train_ppo, train_sac)
+from agents import (CURRICULA, FEATURE_DEFAULTS, Curriculum, FeatureEnv,  # noqa: E402
+                    ReplayBuffer, VecEnv, checkpoint_features, feature_dim, load_policy,
+                    make_env, polyak_update, train_ppo, train_sac)
 from agents.common import TRAIN_SEED_BASE, evaluate_policy  # noqa: E402
 from ball_on_tray_gym import BallOnTrayEnv  # noqa: E402
 from networks import (SACActor, SACCritic, gae, sac_actor_loss,  # noqa: E402
@@ -293,7 +296,7 @@ def _falling_scores(module):
     original = module.evaluate_policy
     calls = []
 
-    def stub(policy, seeds, env_kwargs=None):
+    def stub(policy, seeds, env_kwargs=None, features=None):
         calls.append(1)
         mean = 1000.0 - 10.0 * len(calls)
         return {"returns": np.full(len(seeds), mean), "mean": mean, "std": 0.0,
@@ -362,6 +365,142 @@ def test_evaluate_policy_matches_manual_rollout():
     assert abs(res["mean"] - total) < 1e-9
 
 
+# ---------------------------------------------------------- agent inputs
+FULL = {"friction_range": (0.005, 0.05), "disturbance_range": (0.5, 2.0)}
+ALL_FEATURES = {"action_history": 3, "disturbance_feature": True, "obs_scale": 5.0}
+
+
+def _actions(n, seed=0):
+    """A fixed sequence of actions, some outside [-1, 1] to exercise the clipping."""
+    return np.random.RandomState(seed).uniform(-1.5, 1.5, size=(n, 2)).astype(np.float32)
+
+
+def test_default_features_leave_the_environment_unchanged():
+    """With the defaults nothing is wrapped, and an explicit default wrapper changes nothing."""
+    assert feature_dim(None) == feature_dim(FEATURE_DEFAULTS) == 18
+    assert type(make_env(FULL, None)) is BallOnTrayEnv
+    assert type(make_env(FULL, dict(FEATURE_DEFAULTS))) is BallOnTrayEnv
+    plain = BallOnTrayEnv(**FULL)
+    wrapped = FeatureEnv(BallOnTrayEnv(**FULL), **FEATURE_DEFAULTS)
+    obs_a, _ = plain.reset(seed=11)
+    obs_b, _ = wrapped.reset(seed=11)
+    assert np.array_equal(obs_a, obs_b)
+    for action in _actions(60):
+        obs_a, r_a, term_a, trunc_a, _ = plain.step(action)
+        obs_b, r_b, term_b, trunc_b, _ = wrapped.step(action)
+        assert np.array_equal(obs_a, obs_b) and r_a == r_b
+        assert (term_a, trunc_a) == (term_b, trunc_b)
+        if term_a:
+            break
+
+
+def test_action_history_holds_the_last_clipped_actions():
+    """Input = 18-number observation + last N clipped actions, oldest first, zeros after reset."""
+    plain = BallOnTrayEnv(**FULL)
+    env = FeatureEnv(BallOnTrayEnv(**FULL), action_history=3)
+    assert env.obs_dim == 24 and env.observation_space.shape == (24,)
+    obs, _ = env.reset(seed=5)
+    plain.reset(seed=5)
+    assert np.array_equal(obs[18:], np.zeros(6))
+    actions = _actions(5, seed=1)
+    for t, action in enumerate(actions):
+        obs, reward, _, _, _ = env.step(action)
+        plain_obs, plain_reward, _, _, _ = plain.step(action)
+        # The environment itself is untouched: same observation and reward.
+        assert np.array_equal(obs[:18], plain_obs) and reward == plain_reward
+        expected = [np.zeros(2)] * 3 + [np.clip(a, -1.0, 1.0) for a in actions[:t + 1]]
+        assert np.allclose(obs[18:], np.concatenate(expected[-3:]), atol=1e-7), t
+    # Attributes are read from the wrapped environment.
+    assert env.step_count == 5 and env.c_rr == plain.c_rr
+    obs, _ = env.reset(seed=6)
+    assert np.array_equal(obs[18:], np.zeros(6))        # a new episode starts with zeros
+
+
+def test_disturbance_feature_estimates_the_base_acceleration():
+    """Without rolling resistance the estimate is -(5/7) * a_base / 2, whatever the tilt."""
+    env = FeatureEnv(BallOnTrayEnv(friction_range=(0.0, 0.0), disturbance_range=None),
+                     disturbance_feature=True)
+    a_base = np.array([1.2, -0.7])
+    env.reset(seed=0)
+    # FeatureEnv forwards reads only; the state is set on the wrapped environment.
+    env.env.ball_pos = np.zeros(2)      # start in the centre so the ball stays on the tray
+    env.env.disturbances = [{"start": 0.0, "duration": 10.0, "accel": a_base}]
+    expected = -BallOnTrayEnv.ROLLING_FACTOR * a_base / 2.0
+    for action in ([0.3, -0.2], [0.3, -0.2], [-0.5, 0.4], [0.0, 0.0]):    # tilt changes
+        obs, _, terminated, _, _ = env.step(action)
+        assert not terminated
+        assert obs.shape == (20,)
+        assert np.allclose(obs[18:], expected, atol=2e-4), (obs[18:], expected)
+    # No disturbance and a level tray at rest: the estimate is zero.
+    still = FeatureEnv(BallOnTrayEnv(friction_range=(0.02, 0.02)), disturbance_feature=True)
+    obs, _ = still.reset(seed=0)
+    assert np.allclose(obs[18:], 0.0)
+
+
+def test_obs_scale_scales_position_and_velocity_only():
+    plain = BallOnTrayEnv(**FULL)
+    env = FeatureEnv(BallOnTrayEnv(**FULL), obs_scale=5.0)
+    plain.reset(seed=2)
+    env.reset(seed=2)
+    for action in _actions(10, seed=2):
+        plain_obs = plain.step(action)[0]
+        obs = env.step(action)[0]
+    frames, plain_frames = obs.reshape(3, 6), plain_obs.reshape(3, 6)
+    assert np.allclose(frames[:, :4], 5.0 * plain_frames[:, :4])
+    assert np.array_equal(frames[:, 4:], plain_frames[:, 4:])      # tilt not scaled
+
+
+def test_vecenv_with_features_resets_the_action_history():
+    vec = VecEnv(2, dict(FIXED, max_steps=4), seed=0, features={"action_history": 2})
+    assert vec.obs.shape == (2, 22)
+    for _ in range(3):
+        result = vec.step(np.full((2, 2), 0.5, np.float32))
+    assert np.allclose(vec.obs[:, 18:], 0.5)
+    result = vec.step(np.full((2, 2), 0.5, np.float32))      # step 4: truncated, reset
+    assert result["truncated"].all()
+    assert np.allclose(result["next_obs"][:, 18:], 0.5)      # last obs of the episode
+    assert np.array_equal(vec.obs[:, 18:], np.zeros((2, 4)))  # first obs of the next one
+    vec.close()
+
+
+def test_ppo_with_features_round_trip():
+    """Training stores the options; the loaded policy runs with the same input."""
+    out = tempfile.mkdtemp()
+    try:
+        network, _ = train_ppo(out, verbose=False, total_steps=512, num_envs=2,
+                               rollout_steps=128, epochs=1, eval_interval=512,
+                               curriculum="full", seed=0, **ALL_FEATURES)
+        assert network.config["obs_dim"] == 26 == feature_dim(ALL_FEATURES)
+        algo, policy, checkpoint = load_policy(os.path.join(out, "last.pt"))
+        assert algo == "ppo" and checkpoint_features(checkpoint) == ALL_FEATURES
+        res = evaluate_policy(policy, seeds=(0,), features=checkpoint_features(checkpoint))
+        assert res["returns"].shape == (1,)
+        # Evaluation with the features equals a hand-run episode in FeatureEnv.
+        env = FeatureEnv(BallOnTrayEnv(**FULL), **ALL_FEATURES)
+        obs, _ = env.reset(seed=0)
+        total, done = 0.0, False
+        while not done:
+            obs, r, term, trunc, _ = env.step(policy(obs))
+            total += r
+            done = term or trunc
+        assert abs(res["mean"] - total) < 1e-9
+    finally:
+        shutil.rmtree(out)
+
+
+def test_old_checkpoints_load_with_the_plain_observation():
+    """Checkpoints written before the options existed have the defaults."""
+    assert checkpoint_features({"train_config": {"seed": 0}}) == FEATURE_DEFAULTS
+    assert checkpoint_features({}) == FEATURE_DEFAULTS
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for name in ("ppo_staged_seed0.pt", "sac_staged_seed0.pt"):
+        path = os.path.join(root, "trained", name)
+        if os.path.exists(path):
+            _, policy, checkpoint = load_policy(path)
+            assert checkpoint_features(checkpoint) == FEATURE_DEFAULTS
+            policy(np.zeros(18, np.float32))
+
+
 if __name__ == "__main__":
     tests = [
         test_gae_matches_hand_computation,
@@ -384,6 +523,13 @@ if __name__ == "__main__":
         test_ppo_best_checkpoint_is_from_the_final_stage,
         test_sac_best_checkpoint_is_from_the_final_stage,
         test_evaluate_policy_matches_manual_rollout,
+        test_default_features_leave_the_environment_unchanged,
+        test_action_history_holds_the_last_clipped_actions,
+        test_disturbance_feature_estimates_the_base_acceleration,
+        test_obs_scale_scales_position_and_velocity_only,
+        test_vecenv_with_features_resets_the_action_history,
+        test_ppo_with_features_round_trip,
+        test_old_checkpoints_load_with_the_plain_observation,
     ]
     torch.set_num_threads(1)
     for test in tests:

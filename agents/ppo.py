@@ -20,6 +20,11 @@ Builds on the stage 2 pieces: ``ActorCritic`` (networks/actor_critic.py) and
 base acceleration (``privileged_features``), from the same ``info`` dicts the
 environment returns; the actor never sees them.
 
+``action_history``, ``disturbance_feature`` and ``obs_scale`` extend the input
+of both networks (``agents/features.py``); the defaults keep the plain
+18-number observation. They are stored in the checkpoint's ``train_config``,
+so ``evaluate_agent.py`` and ``demo.py`` rebuild the same input.
+
 Reward scale: the per-step reward is up to 1.5 and gamma = 0.99, so returns
 reach ~150. Rewards are multiplied by ``reward_scale`` (0.1) for learning
 only, which keeps value targets near 10 and the value loss on a scale
@@ -34,6 +39,7 @@ from torch import nn
 
 from agents.common import (EVAL_SEEDS, Curriculum, ProgressLog, VecEnv, evaluate_policy,
                            recent_episode_stats)
+from agents.features import feature_config, feature_dim
 from networks import PRIVILEGED_DIM, ActorCritic, gae, ppo_loss, privileged_features
 
 PPO_DEFAULTS = {
@@ -51,6 +57,9 @@ PPO_DEFAULTS = {
     "max_grad_norm": 0.5,
     "reward_scale": 0.1,        # learning only; logs are unscaled
     "asymmetric": False,        # critic also gets c_rr and a_base
+    "action_history": 0,        # agent input: last N actions (agents/features.py)
+    "disturbance_feature": False,   # agent input: unexplained-acceleration estimate
+    "obs_scale": 1.0,           # agent input: factor on position and velocity
     "curriculum": "staged",
     "realistic": False,         # realism parameters in the last curriculum stage
     "eval_interval": 50000,     # steps between evaluations
@@ -107,12 +116,14 @@ def train_ppo(out_dir, verbose=True, **overrides):
     batch_size = n_envs * n_steps
     n_iterations = max(1, cfg["total_steps"] // batch_size)
     asym = bool(cfg["asymmetric"])
+    features = feature_config(cfg)
 
-    network = ActorCritic(privileged_dim=PRIVILEGED_DIM if asym else 0, seed=cfg["seed"])
+    network = ActorCritic(obs_dim=feature_dim(features),
+                          privileged_dim=PRIVILEGED_DIM if asym else 0, seed=cfg["seed"])
     optimiser = torch.optim.Adam(network.parameters(), lr=cfg["learning_rate"], eps=1e-5)
     curriculum = Curriculum(cfg["curriculum"], n_iterations * batch_size, cfg["realistic"])
     _, stage_name, stage_kwargs = curriculum.stage_at(0)
-    vec = VecEnv(n_envs, stage_kwargs, seed=cfg["seed"])
+    vec = VecEnv(n_envs, stage_kwargs, seed=cfg["seed"], features=features)
     eval_kwargs = curriculum.final_env_kwargs()
     log = ProgressLog(os.path.join(out_dir, "progress.csv"), LOG_COLUMNS)
     finished = []
@@ -214,7 +225,7 @@ def train_ppo(out_dir, verbose=True, **overrides):
         if step >= next_eval or iteration == n_iterations - 1:
             next_eval += cfg["eval_interval"]
             result = evaluate_policy(lambda o: network.predict(o, deterministic=True),
-                                     EVAL_SEEDS, eval_kwargs)
+                                     EVAL_SEEDS, eval_kwargs, features=features)
             row.update({"eval_return": result["mean"], "eval_std": result["std"],
                         "eval_survival": result["survival"], "eval_goal": result["goal"]})
             summary = {k: result[k] for k in ("mean", "std", "survival", "goal")}

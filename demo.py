@@ -209,12 +209,19 @@ def main():
         print_design(gain, info)
         policy_fns["lqr"] = make_lqr_policy(gain)
     labels = dict(POLICY_LABELS)
+    agent_features = None
     if "agent" in policy_names:
-        from agents import load_policy        # imports torch only when needed
+        # imports torch only when needed
+        from agents import FeatureEnv, checkpoint_features, describe, is_default, load_policy
         algo, policy_fns["agent"], checkpoint = load_policy(args.checkpoint)
         labels["agent"] = POLICY_LABELS["agent"].format(algo.upper())
         print("agent: {} checkpoint {} (step {:,})".format(
             algo.upper(), args.checkpoint, checkpoint.get("step", 0)))
+        features = checkpoint_features(checkpoint)
+        if not is_default(features):
+            agent_features = features
+            print("agent input: {}".format(describe(features)))
+        print("")
 
     # The environment itself does not render here; the 3D renderer draws it from
     # outside, which lets the demo pass the reward and control the pacing.
@@ -229,7 +236,11 @@ def main():
                            + (REALISTIC_LABEL_SUFFIX if args.realistic else ""))
         # Every policy gets the same seed, i.e. the same start position, rolling
         # resistance and disturbance schedule.
-        summary = run_episode(env, renderer, name, policy_fns[name], args.seed, frames)
+        # An agent trained with extra inputs gets them through FeatureEnv, which
+        # wraps the same environment; the renderer keeps drawing ``env``.
+        episode_env = (FeatureEnv(env, **agent_features)
+                       if name == "agent" and agent_features else env)
+        summary = run_episode(episode_env, renderer, name, policy_fns[name], args.seed, frames)
         print_summary(summary)
         if frames is None:
             print_render_stats(summary, env.DT)

@@ -26,6 +26,13 @@ and every episode must get its own seed so that a run can be reproduced
 exactly. Episode seeds are drawn from ``TRAIN_SEED_BASE`` upwards, disjoint
 from the seeds used for evaluation (0-99 final, 500-519 during training) and
 by ``networks/experiments.py`` (1000-2049).
+
+Agent inputs
+------------
+``VecEnv`` and ``evaluate_policy`` take the optional ``features`` of
+``agents/features.py`` (past actions, disturbance estimate, input scale).
+With the defaults the environments are plain ``BallOnTrayEnv`` instances and
+the policy sees the 18-number observation, exactly as before.
 """
 
 import csv
@@ -34,7 +41,7 @@ import time
 
 import numpy as np
 
-from ball_on_tray_gym import BallOnTrayEnv
+from agents.features import feature_dim, make_env
 from demo import REALISTIC_KWARGS      # the same settings as demo.py --realistic
 
 # ------------------------------------------------------------- task ranges
@@ -135,16 +142,18 @@ class VecEnv(object):
         num_envs: number of environments N.
         env_kwargs: arguments of ``BallOnTrayEnv`` for the first episodes.
         seed: seed of the episode-seed stream.
+        features: options of ``agents/features.py``; None (default) gives the
+            plain 18-number observation.
     """
 
-    def __init__(self, num_envs, env_kwargs, seed):
+    def __init__(self, num_envs, env_kwargs, seed, features=None):
         self.num_envs = int(num_envs)
         self._kwargs = dict(env_kwargs)
+        self._features = features
         self._seed_rng = np.random.RandomState(seed)
         self.envs = [None] * self.num_envs
         self._built_kwargs = [None] * self.num_envs   # arguments each env was built with
-        self.obs = np.zeros((self.num_envs, BallOnTrayEnv.N_STACK * BallOnTrayEnv.FRAME_DIM),
-                            dtype=np.float32)
+        self.obs = np.zeros((self.num_envs, feature_dim(features)), dtype=np.float32)
         self.infos = [None] * self.num_envs
         self.episode_returns = np.zeros(self.num_envs)
         self.episode_lengths = np.zeros(self.num_envs, dtype=np.int64)
@@ -164,7 +173,7 @@ class VecEnv(object):
         if env is None or self._built_kwargs[i] != self._kwargs:
             if env is not None:
                 env.close()
-            env = BallOnTrayEnv(**self._kwargs)
+            env = make_env(self._kwargs, self._features)
             self.envs[i] = env
             self._built_kwargs[i] = dict(self._kwargs)
         obs, info = env.reset(seed=self._next_seed())
@@ -218,13 +227,18 @@ class VecEnv(object):
                 env.close()
 
 
-def evaluate_policy(policy, seeds=EVAL_SEEDS, env_kwargs=None):
+def evaluate_policy(policy, seeds=EVAL_SEEDS, env_kwargs=None, features=None):
     """Run a deterministic policy (obs -> action) on fixed seeds.
 
     Args:
-        policy: function mapping one observation (18,) to an action (2,).
+        policy: function mapping one observation to an action (2,). The
+            observation is the 18-number one, or the extended input of
+            ``agents/features.py`` if ``features`` is given.
         seeds: episode seeds.
         env_kwargs: environment arguments; default: the full task range.
+        features: options of ``agents/features.py`` the policy was trained
+            with; None (default) for the plain observation (PD, LQR, and
+            agents trained without the options).
 
     Returns:
         dict with "returns" (array), "mean", "std", "survival" (fraction of
@@ -233,7 +247,7 @@ def evaluate_policy(policy, seeds=EVAL_SEEDS, env_kwargs=None):
     """
     kwargs = {"friction_range": FULL_FRICTION, "disturbance_range": FULL_DISTURBANCE}
     kwargs.update(env_kwargs or {})
-    env = BallOnTrayEnv(**kwargs)
+    env = make_env(kwargs, features)
     returns, survived, goal = [], [], []
     for seed in seeds:
         obs, _ = env.reset(seed=int(seed))

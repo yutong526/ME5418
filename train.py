@@ -18,6 +18,8 @@ Examples:
     python train.py --algo sac --steps 200000       # SAC is slower per step, more sample-efficient
     python train.py --algo ppo --curriculum full    # ablation: full randomisation from step 0
     python train.py --algo ppo --realistic          # noise, lag and delay in the last stage
+    python train.py --algo ppo --realistic --action-history 3     # + the last 3 actions as input
+    python train.py --algo ppo --disturbance-feature --obs-scale 5  # + disturbance estimate
 
 Then ``python evaluate_agent.py runs/<name>/best.pt`` compares the agent with
 PD and LQR on the test seeds 0-99, and ``python demo.py --checkpoint
@@ -31,7 +33,8 @@ import time
 
 import torch
 
-from agents import CURRICULA, PPO_DEFAULTS, SAC_DEFAULTS, train_ppo, train_sac
+from agents import (CURRICULA, PPO_DEFAULTS, SAC_DEFAULTS, describe, feature_dim, train_ppo,
+                    train_sac)
 
 # --quick: a short run that exercises every code path (curriculum stages,
 # updates, evaluation, checkpoints) in about a minute. It is not expected to
@@ -59,6 +62,16 @@ def parse_args():
                              "(demo.py --realistic) to the last curriculum stage")
     parser.add_argument("--asymmetric", action="store_true",
                         help="PPO only: the critic also receives c_rr and a_base")
+    parser.add_argument("--action-history", type=int, default=0, metavar="N",
+                        help="PPO only: add the agent's last N actions to its input "
+                             "(recommended: 3 with --realistic)")
+    parser.add_argument("--disturbance-feature", action="store_true",
+                        help="PPO only: add an estimate of the base acceleration (the ball "
+                             "acceleration the tilt does not explain) to the input; for the "
+                             "ideal condition, not with --realistic")
+    parser.add_argument("--obs-scale", type=float, default=1.0, metavar="X",
+                        help="PPO only: multiply position and velocity in the input by X "
+                             "(default 1; 5 with --disturbance-feature)")
     parser.add_argument("--eval-interval", type=int, default=None,
                         help="environment steps between evaluations")
     parser.add_argument("--quick", action="store_true",
@@ -69,7 +82,27 @@ def parse_args():
     args = parser.parse_args()
     if args.asymmetric and args.algo != "ppo":
         parser.error("--asymmetric applies to PPO only")
+    uses_features = (args.action_history != 0 or args.disturbance_feature
+                     or args.obs_scale != 1.0)
+    if uses_features and args.algo != "ppo":
+        parser.error("--action-history, --disturbance-feature and --obs-scale apply to PPO only")
+    if args.action_history < 0:
+        parser.error("--action-history must be >= 0")
+    if not args.obs_scale > 0.0:
+        parser.error("--obs-scale must be > 0")
     return args
+
+
+def feature_tag(args):
+    """Part of the run name for the input options, e.g. "_act3" or "_dfeat_x5"."""
+    tag = ""
+    if args.action_history:
+        tag += "_act{}".format(args.action_history)
+    if args.disturbance_feature:
+        tag += "_dfeat"
+    if args.obs_scale != 1.0:
+        tag += "_x{:g}".format(args.obs_scale)
+    return tag
 
 
 def main():
@@ -79,6 +112,9 @@ def main():
     options = {"seed": args.seed, "curriculum": args.curriculum, "realistic": args.realistic}
     if args.algo == "ppo":
         options["asymmetric"] = args.asymmetric
+        options["action_history"] = args.action_history
+        options["disturbance_feature"] = args.disturbance_feature
+        options["obs_scale"] = args.obs_scale
     if args.steps is not None:
         options["total_steps"] = args.steps
     if args.eval_interval is not None:
@@ -86,8 +122,8 @@ def main():
     if args.quick:
         options.update(QUICK[args.algo])
 
-    name = args.name or "{}{}_{}{}_seed{}{}".format(
-        args.algo, "_asym" if args.asymmetric else "", args.curriculum,
+    name = args.name or "{}{}{}_{}{}_seed{}{}".format(
+        args.algo, "_asym" if args.asymmetric else "", feature_tag(args), args.curriculum,
         "_realistic" if args.realistic else "", args.seed, "_quick" if args.quick else "")
     out_dir = os.path.join(args.out_root, name)
     os.makedirs(out_dir, exist_ok=True)
@@ -97,6 +133,9 @@ def main():
         json.dump(config, handle, indent=2, sort_keys=True)
     print("training {} for {:,} steps -> {}".format(args.algo.upper(), config["total_steps"],
                                                      out_dir), flush=True)
+    if args.algo == "ppo":
+        print("agent input: {} ({} numbers)".format(describe(config), feature_dim(config)),
+              flush=True)
 
     start = time.perf_counter()
     if args.algo == "ppo":

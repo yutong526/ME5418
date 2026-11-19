@@ -5,6 +5,11 @@ Every policy runs on the same test seeds 0-99 (the seeds of
 checkpoint), so each seed gives the same start position, c_rr and
 disturbance schedule to every policy and the comparison is paired.
 
+An agent trained with extra inputs (``--action-history``,
+``--disturbance-feature``, ``--obs-scale``) is evaluated with the same inputs,
+read from its checkpoint; PD and LQR always see the plain observation. The
+extra inputs do not change the environment, so the pairing still holds.
+
 Examples:
     python evaluate_agent.py trained/*_seed0.pt          # the seed-0 reference agents (best.pt)
     python evaluate_agent.py runs/ppo_staged_seed0/best.pt
@@ -21,7 +26,8 @@ import os
 import numpy as np
 import torch
 
-from agents import TEST_SEEDS, evaluate_policy, load_policy
+from agents import (TEST_SEEDS, checkpoint_features, describe, evaluate_policy, is_default,
+                    load_policy)
 from controllers import design_lqr, make_lqr_policy, pd_policy
 from demo import REALISTIC_KWARGS
 
@@ -50,25 +56,29 @@ def main():
     seeds = TEST_SEEDS[:args.episodes]
     env_kwargs = dict(REALISTIC_KWARGS) if args.realistic else {}
 
+    # (name, policy, input options); None = the plain 18-number observation
     policies = []
     if not args.no_baselines:
         gain, _ = design_lqr()
-        policies += [("PD", pd_policy), ("LQR", make_lqr_policy(gain))]
+        policies += [("PD", pd_policy, None), ("LQR", make_lqr_policy(gain), None)]
     for path in args.checkpoints:
         algo, policy, checkpoint = load_policy(path)
+        features = checkpoint_features(checkpoint)
         # runs/<run>/best.pt -> <run>; trained/<run>.pt -> <run>
         stem = os.path.splitext(os.path.basename(path))[0]
         run = (os.path.basename(os.path.dirname(os.path.abspath(path)))
                if stem in ("best", "last") else stem)
-        policies.append(("{} {}".format(algo.upper(), run), policy))
+        policies.append(("{} {}".format(algo.upper(), run), policy, features))
+        if not is_default(features):
+            print("{}: agent input = {}".format(run, describe(features)))
 
     print("test seeds {}-{}, full randomisation range{}".format(
         seeds[0], seeds[-1], ", REALISTIC (noise, lag, delay)" if args.realistic else ""))
     print("  {:<38} {:>16} {:>9} {:>8} {:>8}  {}".format(
         "policy", "return", "% of max", "survival", "goal %", "vs LQR (paired)"))
     results = {}
-    for name, policy in policies:
-        res = evaluate_policy(policy, seeds, env_kwargs)
+    for name, policy, features in policies:
+        res = evaluate_policy(policy, seeds, env_kwargs, features=features)
         results[name] = res
         paired = ""
         if "LQR" in results and name != "LQR":

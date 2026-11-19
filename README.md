@@ -87,6 +87,7 @@ ME5418_BallOnTray/
 ├── agents/
 │   ├── __init__.py
 │   ├── common.py
+│   ├── features.py
 │   ├── ppo.py
 │   └── sac.py
 ├── tests/
@@ -115,6 +116,7 @@ ME5418_BallOnTray/
 | `networks/experiments.py` | Two small supervised experiments with the networks: behaviour cloning of the LQR, and the critic comparison. |
 | `demo_network.py` | Demo of the networks: construction, PPO forward and backward pass, SAC forward and backward pass, closed loop; `--bc` and `--critics` run the experiments. |
 | `agents/common.py` | Training infrastructure: the curriculum (staged domain randomisation), parallel environments with automatic reset, evaluation on fixed seeds, CSV logging. |
+| `agents/features.py` | Optional extra inputs of the PPO agent (its last actions, a disturbance estimate, a scale on position and velocity) and the `FeatureEnv` wrapper that builds them; off by default. See [Agent inputs](#agent-inputs). |
 | `agents/ppo.py` | The PPO training loop. |
 | `agents/sac.py` | The SAC training loop and its replay buffer. |
 | `train.py` | Command line for training PPO or SAC; writes `runs/<name>/`. |
@@ -124,13 +126,13 @@ ME5418_BallOnTray/
 | `tests/test_renderer_3d.py` | Tests of the 3D renderer (image format, tilt direction, ball on the tray surface). |
 | `tests/test_realism.py` | Tests of the optional realism parameters, including the regression check against `tests/golden_v1.npz`. |
 | `tests/test_networks.py` | Tests of the networks and losses (shapes, action range, probability formulas, tanh correction, gradients, determinism, save and load). |
-| `tests/test_agents.py` | Tests of the training code (GAE, parallel environments, curriculum, replay buffer, target update, entropy tuning) and short smoke runs of both training loops. |
+| `tests/test_agents.py` | Tests of the training code (GAE, parallel environments, curriculum, replay buffer, target update, entropy tuning, the optional agent inputs) and short smoke runs of both training loops. |
 | `tests/make_golden.py`, `tests/golden_v1.npz` | The script that recorded the trajectory snapshot, and the snapshot itself. They are kept as a record: `make_golden.py` does not need to be run again and the snapshot must not be regenerated. |
 | `environment.yml` | Conda environment. |
 | `media/` | Recorded demos (`demo_3d.gif`: random and LQR; `demo_ppo_3d.gif`: the reference PPO agent on seed 4) and the learning curves of the reference runs (`learning_curves.png`). |
 | `results/` | Output of `evaluate_baselines.py`, and of `evaluate_agent.py --csv` for the reference runs (`agents_ideal.csv`, `agents_realistic.csv`). |
 | `runs/` | Output of `train.py` (progress logs and checkpoints); not tracked by git. |
-| `trained/` | Checkpoints (`best.pt` and `last.pt`) of the twelve reference runs (see [Reference runs](#reference-runs)). |
+| `trained/` | Checkpoints (`best.pt` and `last.pt`) of the eighteen reference runs (see [Reference runs](#reference-runs)). |
 | `report/` | Project report: `ME5418_Agent_Report.pdf` (stage 3), written from `ME5418_Agent_Report.html` next to it. |
 
 ## How to Run the Demo
@@ -186,7 +188,7 @@ python tests/test_networks.py       # the neural networks and their losses
 python tests/test_agents.py         # the training code, including short training runs (~20 s)
 ```
 
-Each script prints one line per test and ends with `All N tests passed.` (14, 7, 8, 19 and 20 tests). No test framework is needed. `tests/test_realism.py` compares the environment with the recorded snapshot `tests/golden_v1.npz`; `tests/make_golden.py` only documents how that snapshot was recorded and is not run again.
+Each script prints one line per test and ends with `All N tests passed.` (14, 7, 8, 19 and 27 tests). No test framework is needed. `tests/test_realism.py` compares the environment with the recorded snapshot `tests/golden_v1.npz`; `tests/make_golden.py` only documents how that snapshot was recorded and is not run again.
 
 ## Evaluating the baselines
 
@@ -209,7 +211,7 @@ The proposal trains PPO as the baseline and SAC as the more sample-efficient alt
 | SAC actor | `sac.py` | 18 → 128 → 64 → 2 + 2 | Mean and log std of a Gaussian (log std clamped to [−20, 2]); the sample is squashed by tanh into (−1, 1). | 10,948 |
 | SAC critic | `sac.py` | (18 + 2) → 128 → 64 → 1, twice | Two independent Q-values Q1(s, a), Q2(s, a). | 22,018 |
 
-The observation is a short vector of 18 numbers, not an image, so a convolutional network has nothing to exploit, and the three stacked frames already contain velocity and recent history, so a recurrent network is not needed. Weights are initialised orthogonally (gain √2 on hidden layers, 0.01 on the policy outputs, 1 on value and Q outputs), so the first actions are close to zero (a level tray).
+The observation is a short vector of 18 numbers, not an image, so a convolutional network has nothing to exploit, and the three stacked frames already contain velocity and recent history, so a recurrent network is not needed. (With the action delay and actuator lag of the realism parameters the frames alone are no longer enough; stage 3 adds the agent's last actions to its input instead of a recurrent network, see [Agent inputs](#agent-inputs).) Weights are initialised orthogonally (gain √2 on hidden layers, 0.01 on the policy outputs, 1 on value and Q outputs), so the first actions are close to zero (a level tray).
 
 **Action range.** The two algorithms bound the action differently. For PPO a sampled action can leave [−1, 1]; its log-probability is computed for the raw sample, and only the action passed to `env.step` is clipped (`ActorCritic.act` returns both). SAC needs the density of the action it applies, so its actor squashes the sample with tanh and corrects the log-probability by the log-determinant of the squashing, computed in the numerically stable form `2 (log 2 − u − softplus(−2u))`.
 
@@ -259,6 +261,8 @@ python train.py --algo ppo --asymmetric          # critic also receives c_rr and
 python train.py --algo ppo --realistic           # noise, lag and delay in the last stage
 python train.py --algo ppo --curriculum full     # no curriculum: full range from step 0
 python train.py --algo ppo --quick               # ~15 s smoke run of every code path
+python train.py --algo ppo --realistic --action-history 3        # + the last 3 actions as input
+python train.py --algo ppo --disturbance-feature --obs-scale 5   # + a disturbance estimate
 ```
 
 | Argument | Default | Meaning |
@@ -269,6 +273,9 @@ python train.py --algo ppo --quick               # ~15 s smoke run of every code
 | `--curriculum` | `staged` | `staged`, `full` or `fixed` (below). |
 | `--realistic` | off | Adds observation noise, actuator lag and a one-step delay (`demo.py --realistic`) to the last stage; evaluation then also uses them. |
 | `--asymmetric` | off | PPO only: the critic also gets `c_rr` and `a_base`. The actor, which is what is deployed, still sees only the observation. |
+| `--action-history N` | `0` | PPO only: the agent's last N actions are added to the input of both networks (3 with `--realistic`). See [Agent inputs](#agent-inputs). |
+| `--disturbance-feature` | off | PPO only: an estimate of the base acceleration, computed from the two newest frames, is added to the input (ideal condition only). |
+| `--obs-scale X` | `1` | PPO only: position and velocity in the input are multiplied by X (5 with `--disturbance-feature`). |
 | `--eval-interval` | PPO 50,000; SAC 10,000 | Steps between evaluations. |
 | `--quick` | off | Short run that goes through every stage, update, evaluation and checkpoint; it is not expected to learn a good policy. |
 | `--name`, `--out-root` | from the options, `runs` | Output folder `runs/<name>/`. |
@@ -283,6 +290,22 @@ Each run writes `config.json` (all hyper-parameters), `progress.csv` (one row pe
 
 Both algorithms scale the reward by 0.1 for learning (logged returns are unscaled), and both treat the two ways an episode ends differently: a fall (`terminated`) is terminal, but the 500-step limit (`truncated`) is not, so the value of the last observation is still bootstrapped. `VecEnv` in `agents/common.py` returns that last observation separately from the observation after the automatic reset. Training episodes use seeds from 100,000 upwards, disjoint from every evaluation seed.
 
+### Agent inputs
+
+With the default options the PPO agent sees exactly the 18-number observation. Three options of `train.py` extend what it sees; the environment, the reward and the baselines are not changed. `FeatureEnv` (`agents/features.py`) wraps `BallOnTrayEnv` and builds the network input as
+
+```
+[18-number observation, x, y, vx, vy of every frame × obs_scale] + [last N actions, oldest first] + [disturbance estimate]
+```
+
+The options are stored in the checkpoint, and `evaluate_agent.py` and `demo.py --checkpoint` rebuild the same input; checkpoints trained without them load as before.
+
+- **`--action-history N`, for the realistic condition.** With a one-step action delay the action given now only takes effect at the next step, and with the actuator lag the commanded tilt runs ahead of the actual tilt. Neither the action waiting in the delay queue nor the commanded tilt is in the observation, so the observation is no longer a Markov state: the policy cannot see what it has already asked for and over-corrects. Its own last actions (as clipped by the environment) restore that information. Every real controller knows them, so they are not privileged information. N = 3 adds 6 numbers (24 in total).
+- **`--disturbance-feature`, for the ideal condition.** The base acceleration is not observed, but it is the part of the ball's acceleration that the tilt does not explain: `est = (v_t − v_(t−1)) / DT − (5/7) · g · sin(tilt_t) ≈ −(5/7) · a_base − rolling resistance`, per axis from the two newest frames, passed divided by 2 (2 numbers). The frames already contain both velocities, but the signal is small: a push of 1 m/s² changes the normalised velocity by only 0.014 per step, and PPO does not learn to extract it. Under observation noise the estimate is useless (0.03 m/s of velocity noise over 20 ms is about 2 m/s², more than the push), so it is not used with `--realistic`.
+- **`--obs-scale X`.** Position and velocity are multiplied by X in the input; near the goal the normalised position is only 0.01–0.1. It is used with `--disturbance-feature`. Under observation noise it amplifies the noise as well.
+
+How these options were chosen: on 2026-11-06 a set of variants was trained (PPO, 1M steps, three training seeds each) and evaluated paired with LQR on 1,000 new seeds (3000–3999); the two configurations above were then confirmed on another 500 seeds (6000–6499) and on the test seeds 0–99. Variants that did not help: 3M instead of 1M steps (in the realistic condition worse and much more variable between seeds), 8 frames and 8 actions instead of 3 and 3, a residual policy on top of LQR, 25 % of training episodes started near an edge or a corner with an immediate push, an initial log std of −1.5, and `--obs-scale 5` in the realistic condition.
+
 ### Evaluating and watching a trained agent
 
 ```bash
@@ -296,15 +319,18 @@ python demo.py --checkpoint runs/ppo_staged_seed0/best.pt --policy lqr+agent
 
 ### Reference runs
 
-`trained/` holds the checkpoints of twelve reference runs: PPO, PPO with the asymmetric critic and PPO with `--realistic`, each with training seeds 0, 1 and 2, and SAC with training seeds 0, 1 and 2. For every run there is `<run>.pt` (its `best.pt`) and `<run>_last.pt` (its `last.pt`), about 0.1 MB (PPO) or 0.23 MB (SAC) per file, so the evaluation and the demo work without training first:
+`trained/` holds the checkpoints of eighteen reference runs: PPO, PPO with the asymmetric critic, PPO with `--realistic`, PPO with `--disturbance-feature --obs-scale 5` and PPO with `--realistic --action-history 3`, each with training seeds 0, 1 and 2, and SAC with training seeds 0, 1 and 2. For every run there is `<run>.pt` (its `best.pt`) and `<run>_last.pt` (its `last.pt`), about 0.1 MB (PPO) or 0.23 MB (SAC) per file, so the evaluation and the demo work without training first:
 
 ```bash
 python evaluate_agent.py trained/ppo_staged_seed0.pt trained/ppo_asym_staged_seed0.pt trained/sac_staged_seed0.pt
 python evaluate_agent.py trained/ppo_staged_realistic_seed0.pt trained/ppo_staged_seed0.pt --realistic
+python evaluate_agent.py trained/ppo_dfeat_x5_staged_seed0.pt trained/ppo_staged_seed0.pt
+python evaluate_agent.py trained/ppo_act3_staged_realistic_seed0.pt trained/ppo_staged_realistic_seed0.pt --realistic
 python demo.py --checkpoint trained/ppo_staged_seed0.pt --policy lqr+agent
+python demo.py --checkpoint trained/ppo_act3_staged_realistic_seed0.pt --policy lqr+agent --realistic
 ```
 
-They were trained with `python train.py --algo ppo`, `--algo ppo --asymmetric`, `--algo ppo --realistic` and `--algo sac`, with `--seed 0`, `1` and `2`, all twelve at the same time on one machine (Ubuntu 26.04, AMD Ryzen 9 8945HX, Python 3.7.16, PyTorch 1.13.1+cpu, one CPU core per run): each PPO run of 1M steps took 370–398 s, each SAC run of 200k steps 1,349–1,353 s. On one machine a run is reproducible exactly; on another machine (or operating system) the floating-point details differ and the same seed gives a different run, so expect numbers within the ranges below rather than identical ones. `results/agents_ideal.csv` and `results/agents_realistic.csv` hold every test episode.
+The first twelve were trained with `python train.py --algo ppo`, `--algo ppo --asymmetric`, `--algo ppo --realistic` and `--algo sac`, with `--seed 0`, `1` and `2`, all twelve at the same time on one machine (Ubuntu 26.04, AMD Ryzen 9 8945HX, Python 3.7.16, PyTorch 1.13.1+cpu, one CPU core per run): each PPO run of 1M steps took 370–398 s, each SAC run of 200k steps 1,349–1,353 s. The six runs with extra inputs were trained with `python train.py --algo ppo --disturbance-feature --obs-scale 5` and `--algo ppo --realistic --action-history 3`, with `--seed 0`, `1` and `2`, all six at the same time on another machine (Windows 11, Intel Core i7-12700H, Python 3.7.16, PyTorch 1.13.1+cpu, one CPU core per run, about 400 s per run), and their test episodes were evaluated there. On one machine a run is reproducible exactly; on another machine (or operating system) the floating-point details differ and the same seed gives a different run, so expect numbers within the ranges below rather than identical ones. (Evaluating the first twelve checkpoints on the Windows machine changes single test returns by up to 0.5 and none of the means in the table.) `results/agents_ideal.csv` and `results/agents_realistic.csv` hold every test episode.
 
 Results on the test seeds 0–99 (`evaluate_agent.py`; maximum return 750). For the agents, each entry is the mean over the three training seeds with the range in brackets; "vs LQR" is the paired difference in return on the same test seeds, and "better" the number of test seeds on which the agent beats LQR.
 
@@ -314,14 +340,18 @@ Results on the test seeds 0–99 (`evaluate_agent.py`; maximum return 750). For 
 | | LQR | 724.4 ± 8.3 | 100 % | 96.1 | | |
 | | PPO | 720.8 (715.9–726.5) | 99–100 % | 95.0 (94.0–95.9) | −3.7 (−8.5 to +2.1), better on 57–80 | 720.0 (714.3–726.5) |
 | | PPO, asymmetric critic | 721.7 (719.1–725.4) | 99–100 % | 95.2 (94.7–95.7) | −2.7 (−5.3 to +1.0), better on 74–79 | 721.0 (719.1–724.2) |
+| | PPO + disturbance estimate (`--disturbance-feature --obs-scale 5`) | 726.7 (721.7–729.2) | 99–100 % | 95.4 (94.6–95.9) | +2.3 (−2.7 to +4.8), better on 76–89 | 726.3 (721.1–729.2) |
 | | SAC | 685.3 (672.8–694.5) | 99–100 % | 88.1 (85.4–90.5) | −39.1 (−51.6 to −29.9), better on 0–1 | 679.8 (658.2–695.8) |
 | Realistic (noise, lag 0.05 s, 1-step delay) | PD | 658.5 ± 68.3 | 99 % | 86.7 | | |
 | | LQR | 627.4 ± 111.1 | 97 % | 78.8 | | |
 | | PPO trained on the ideal task | 358.4 (236.2–454.9) | 32–83 % | 17.6 (8.5–30.8) | −269.0 (−391.2 to −172.5), better on 0–1 | |
 | | PPO trained with `--realistic` | 625.3 (618.9–628.8) | 95–97 % | 78.2 (76.3–79.3) | −2.1 (−8.6 to +1.4), better on 34–47 | 625.7 (620.0–628.8) |
+| | PPO trained with `--realistic --action-history 3` | 679.7 (674.9–686.2) | 98–99 % | 86.8 (86.1–87.4) | +52.3 (+47.5 to +58.8), better on 98–100 | 681.4 (674.9–685.7) |
 
 - In the ideal condition PPO is level with LQR: the mean over seeds is a few points below LQR, single runs range from 8.5 below to 2.1 above, and the number of test seeds on which PPO is better varies from 57 to 80 between training seeds (34 to 80 if `last.pt` is included). Four of the six PPO models (both variants) drop the ball on test seed 0, which starts near a corner with a 1.41 m/s² push from t = 0.03 s; LQR saves that episode.
 - Under noise, lag and delay, PPO trained to the end of the `--realistic` curriculum is level with LQR (−8.6 to +1.4) and below PD in every run (29.7 to 39.6 lower, paired). PPO trained on the ideal task fails often in that condition.
+- With its last 3 actions as extra input ([Agent inputs](#agent-inputs)), PPO trained with `--realistic` is above LQR in all three runs (+47.5 to +58.8, paired, better on 98–100 of the 100 test seeds) and above PD (+16.5 to +27.7, better on 94–99). The same checkpoints were +64.3 (+59.4 to +68.5) against LQR on 1,000 other seeds (3000–3999) in the experiments of 2026-11-06. LQR and PD were designed for the ideal model; in the same experiments a classical controller designed for the lag and delay (LQR on the extended model with a steady-state Kalman filter and a disturbance estimate, not part of this repository) reached 697.7 on those seeds, against 685.5 for these agents and 621.3 for LQR.
+- With the disturbance estimate, two of the three ideal-condition runs are +4.8 above LQR on the test seeds (better on 86 and 89 of 100); the third (training seed 1) drops the ball on test seed 0, the start described above, and is −2.7 on average while better on 76 of 100. On 1,000 other seeds (3000–3999) the three runs were +4.1 to +5.1. The head room in the ideal condition is small: in the same experiments a model-predictive controller that knows the true state, `c_rr` and the future pulses was +6.0 above LQR (28 seeds).
 - An earlier version of this table reported "+29.9 against LQR" for `--realistic`. That number came from a `best.pt` saved at step 51,200, in the first curriculum stage (fixed `c_rr`, no pulses, no noise), because `best.pt` was then chosen over the whole run. That early checkpoint, which never trained under noise, lag or delay, scored 657.3 ± 69.8 (99 %) under them, level with PD (paired −1.2, better on 49/100). It is no longer in `trained/`; it is the file `trained/ppo_staged_realistic_seed0.pt` of commit `db77229`.
 - SAC stays below PD in all three runs. The cause is still open.
 - `media/learning_curves.png` shows the learning curves of the seed-0 runs of PPO, PPO with the asymmetric critic and SAC (`plot_training.py`). Three training seeds per configuration are still few; in particular they do not show a difference between the two PPO critics.
