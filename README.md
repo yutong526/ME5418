@@ -71,6 +71,7 @@ ME5418_BallOnTray/
 ├── README.md
 ├── environment.yml
 ├── demo.py
+├── record_demo_mp4.py
 ├── demo_network.py
 ├── train.py
 ├── evaluate_agent.py
@@ -107,6 +108,7 @@ ME5418_BallOnTray/
 | File | Content |
 |---|---|
 | `demo.py` | The demo: random, PD and LQR policies, or a trained agent (`--checkpoint`), in the 3D view. |
+| `record_demo_mp4.py` | Side-by-side 3D comparison video recorder (PD vs. LQR vs. best RL agent on identical disturbance seeds), exporting a 1920×640 H.264 `.mp4` (`media/final_demo.mp4`). |
 | `ball_on_tray_gym.py` | The environment class `BallOnTrayEnv` (dynamics, reward, observation) and the 3D renderer `TrayRenderer3D`, drawn with matplotlib's mplot3d. The renderer only reads the environment and does not change it; it is used by `BallOnTrayEnv.render()` and by `demo.py`. |
 | `controllers.py` | The PD and LQR baseline controllers, used by `demo.py` and `evaluate_baselines.py`. |
 | `evaluate_baselines.py` | Batch evaluation of the PD and LQR controllers without rendering. |
@@ -129,11 +131,11 @@ ME5418_BallOnTray/
 | `tests/test_agents.py` | Tests of the training code (GAE, parallel environments, curriculum, replay buffer, target update, entropy tuning, the optional agent inputs) and short smoke runs of both training loops. |
 | `tests/make_golden.py`, `tests/golden_v1.npz` | The script that recorded the trajectory snapshot, and the snapshot itself. They are kept as a record: `make_golden.py` does not need to be run again and the snapshot must not be regenerated. |
 | `environment.yml` | Conda environment. |
-| `media/` | Recorded demos (`demo_3d.gif`: random and LQR; `demo_ppo_3d.gif`: the reference PPO agent on seed 4) and the learning curves of the reference runs (`learning_curves.png`). |
+| `media/` | Final side-by-side comparison video (`final_demo.mp4`: PD vs. LQR vs. best realistic PPO on seeds 49 and 88), recorded 3D GIF demos (`demo_3d.gif`, `demo_ppo_3d.gif`), learning curves (`learning_curves.png`), and report comparison figures (`report_variant_comparison.png`, `report_realism_analysis.png`). |
 | `results/` | Output of `evaluate_baselines.py`, and of `evaluate_agent.py --csv` for the reference runs (`agents_ideal.csv`, `agents_realistic.csv`). |
 | `runs/` | Output of `train.py` (progress logs and checkpoints); not tracked by git. |
 | `trained/` | Checkpoints (`best.pt` and `last.pt`) of the eighteen reference runs (see [Reference runs](#reference-runs)). |
-| `report/` | Project report: `ME5418_Agent_Report.pdf` (stage 3), written from `ME5418_Agent_Report.html` next to it. |
+| `report/` | Individual final report PDFs of the three team members (e.g., `Report_HongYutong.pdf`). |
 
 ## How to Run the Demo
 
@@ -160,6 +162,16 @@ python demo.py --policy lqr --seed 7                # LQR controller, another se
 python demo.py --policy all                         # random, then PD, then LQR
 python demo.py --realistic --policy all             # with noise, actuator lag and delay
 python demo.py --save-gif media/demo_3d.gif         # write a gif instead of opening a window
+```
+
+### Side-by-side MP4 comparison video
+
+`record_demo_mp4.py` runs PD, LQR, and a trained RL checkpoint simultaneously on the exact same episode seed(s) and exports a 1920×640, 25 fps (1× real-time) H.264 MP4 with live telemetry overlays (requires `imageio` and `imageio-ffmpeg`, included in `environment.yml`):
+
+```bash
+python record_demo_mp4.py                                                  # default: realistic seeds 49 & 88 -> media/final_demo.mp4
+python record_demo_mp4.py --seeds 49 88 --out media/final_demo.mp4         # explicit seeds and output path
+python record_demo_mp4.py --checkpoint trained/ppo_dfeat_x5_staged_seed2.pt --ideal --seeds 4 --out media/final_demo_ideal.mp4
 ```
 
 When the LQR controller is used (`lqr` or `all`), its gain and closed-loop poles are printed first. With `--realistic`, one extra line lists the realism parameters. Closing the window stops the demo early. On screen the demo runs in real time. If the computer cannot draw 50 frames per second, some frames are skipped so that the playback speed stays correct; the terminal reports how many frames were drawn.

@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 .vscode/
+*.zip
+submission/
+_archive_drafts/
 research/
 results_quick/
 runs/
